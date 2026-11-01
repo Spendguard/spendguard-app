@@ -1,7 +1,30 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
-import type { TreasuryAccount } from "@spendguard/sdk";
+import { useRouter, usePathname } from "next/navigation";
+import type { AccountRole, Permission, TreasuryAccount } from "@spendguard/sdk";
+import { hasPermission } from "@spendguard/sdk";
+
+/**
+ * Session-driven account state.
+ *
+ * `userRole` used to be a dropdown the browser picked freely, and the value was
+ * echoed back to the API as `actorRole` — so the server's RBAC checks could be
+ * satisfied by any client that claimed "Owner". The role is now whatever the
+ * server says this user holds on the account they are looking at.
+ */
+
+export type Membership = {
+  accountId: string;
+  name: string;
+  role: AccountRole;
+  memberName: string;
+};
+
+export type Session = {
+  email: string;
+  memberships: Membership[];
+};
 
 interface AccountContextType {
   accounts: TreasuryAccount[];
@@ -10,8 +33,12 @@ interface AccountContextType {
   setActiveAccountId: (id: string) => void;
   refreshAccounts: () => Promise<void>;
   loading: boolean;
-  userRole: string;
-  setUserRole: (role: string) => void;
+  session: Session | null;
+  userRole: AccountRole | null;
+  /** False when the user holds no role on the active account. */
+  can: (permission: Permission) => boolean;
+  signIn: (email: string) => Promise<void>;
+  signOut: () => Promise<void>;
 }
 
 const AccountContext = createContext<AccountContextType>({
@@ -21,24 +48,43 @@ const AccountContext = createContext<AccountContextType>({
   setActiveAccountId: () => {},
   refreshAccounts: async () => {},
   loading: true,
-  userRole: "Owner",
-  setUserRole: () => {},
+  session: null,
+  userRole: null,
+  can: () => false,
+  signIn: async () => {},
+  signOut: async () => {},
 });
 
 const STORAGE_KEY = "spendguard_active_account_id";
 
 export function AccountProvider({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
+  const pathname = usePathname();
   const [accounts, setAccounts] = useState<TreasuryAccount[]>([]);
   const [activeAccountId, setActiveAccountIdState] = useState<string | null>(null);
-  const [userRole, setUserRole] = useState<string>("Owner");
+  const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
-  const fetchAccounts = useCallback(async () => {
+  const fetchState = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await fetch("/api/accounts");
-      if (res.ok) {
-        const data = (await res.json()) as TreasuryAccount[];
+
+      const [sessionRes, accountsRes] = await Promise.all([
+        fetch("/api/auth/session"),
+        fetch("/api/accounts"),
+      ]);
+
+      if (sessionRes.status === 401) {
+        setSession(null);
+        setAccounts([]);
+        return;
+      }
+
+      const sessionData = (await sessionRes.json()) as Session;
+      setSession(sessionData);
+
+      if (accountsRes.ok) {
+        const data = (await accountsRes.json()) as TreasuryAccount[];
         setAccounts(data);
 
         // Restore active account from localStorage or default to first
@@ -51,15 +97,26 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
         }
       }
     } catch (err) {
-      console.error("Failed to load treasury accounts:", err);
+      console.error("Failed to load session and treasury accounts:", err);
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchAccounts();
-  }, [fetchAccounts]);
+    fetchState();
+  }, [fetchState]);
+
+  // Unauthenticated users are sent to sign-in. The APIs already refuse them;
+  // this is so the dashboard shows a login rather than an empty shell.
+  useEffect(() => {
+    if (loading) return;
+    if (!session && pathname !== "/signin") {
+      router.replace("/signin");
+    } else if (session && pathname === "/signin") {
+      router.replace("/");
+    }
+  }, [loading, session, pathname, router]);
 
   const setActiveAccountId = (id: string) => {
     setActiveAccountIdState(id);
@@ -68,19 +125,55 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const activeAccount = accounts.find((a) => a.id === activeAccountId || a.address === activeAccountId) || accounts[0] || null;
+  const signIn = useCallback(async (email: string) => {
+    const res = await fetch("/api/auth/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(body.error ?? "Sign-in failed");
+    }
+    await fetchState();
+  }, [fetchState]);
+
+  const signOut = useCallback(async () => {
+    await fetch("/api/auth/session", { method: "DELETE" });
+    setSession(null);
+    setAccounts([]);
+    router.push("/signin");
+  }, [router]);
+
+  const activeAccount =
+    accounts.find((a) => a.id === activeAccountId || a.address === activeAccountId) ||
+    accounts[0] ||
+    null;
+
+  // The role is a property of this user on this account, so it changes when
+  // the account changes — the same person can be Owner here and Viewer there.
+  const userRole: AccountRole | null =
+    session?.memberships.find((m) => m.accountId === activeAccount?.id)?.role ?? null;
+
+  const can = useCallback(
+    (permission: Permission) => (userRole ? hasPermission(userRole, permission) : false),
+    [userRole]
+  );
 
   return (
     <AccountContext.Provider
       value={{
         accounts,
         activeAccount,
-        activeAccountId,
+        activeAccountId: activeAccount?.id ?? null,
         setActiveAccountId,
-        refreshAccounts: fetchAccounts,
+        refreshAccounts: fetchState,
         loading,
+        session,
         userRole,
-        setUserRole,
+        can,
+        signIn,
+        signOut,
       }}
     >
       {children}

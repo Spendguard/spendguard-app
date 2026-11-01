@@ -2,7 +2,6 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { useAccount } from "@/context/AccountContext";
-import { hasPermission, AccountRole } from "@spendguard/sdk";
 
 interface MultiSigApproval {
   id: string;
@@ -26,7 +25,7 @@ interface ProposalItem {
 }
 
 export function MultiSigTab({ accountId }: { accountId: string }) {
-  const { userRole } = useAccount();
+  const { can } = useAccount();
   const [proposals, setProposals] = useState<ProposalItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -45,8 +44,8 @@ export function MultiSigTab({ accountId }: { accountId: string }) {
   const [note, setNote] = useState("");
   const [submittingDecision, setSubmittingDecision] = useState(false);
 
-  const canCreate = hasPermission(userRole as AccountRole, "multisig:create");
-  const canApprove = hasPermission(userRole as AccountRole, "multisig:approve");
+  const canCreate = can("multisig:create");
+  const canApprove = can("multisig:approve");
 
   const loadProposals = useCallback(async () => {
     try {
@@ -83,8 +82,6 @@ export function MultiSigTab({ accountId }: { accountId: string }) {
           amount: amountStroops,
           recipient,
           requiredApprovals,
-          actorRole: userRole,
-          actorEmail: "approver@spendguard.io",
         }),
       });
 
@@ -114,10 +111,8 @@ export function MultiSigTab({ accountId }: { accountId: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           proposalId: selectedProposal.id,
-          approverEmail: `${userRole.toLowerCase().replace(/\s+/g, "")}@spendguard.io`,
           decision,
           note,
-          actorRole: userRole,
         }),
       });
 

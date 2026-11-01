@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { AccountService } from "@/lib/services/account-service";
-import type { AccountRole } from "@spendguard/sdk";
+import { resolveActor } from "@/lib/auth/session";
 
 export async function GET(
   request: Request,
@@ -8,6 +8,11 @@ export async function GET(
 ): Promise<NextResponse> {
   try {
     const { id } = await params;
+    const auth = await resolveActor(request, id);
+    if ("failure" in auth) {
+      return NextResponse.json({ error: auth.failure.error }, { status: auth.failure.status });
+    }
+
     const policies = await AccountService.getPolicies(id);
     const serialized = policies.map((p) => ({
       ...p,
@@ -29,9 +34,12 @@ export async function POST(
 ): Promise<NextResponse> {
   try {
     const { id } = await params;
+    const auth = await resolveActor(request, id);
+    if ("failure" in auth) {
+      return NextResponse.json({ error: auth.failure.error }, { status: auth.failure.status });
+    }
+
     const body = await request.json();
-    const actorRole = (body.actorRole as AccountRole) || "Finance Manager";
-    const actorEmail = (body.actorEmail as string) || "finance@spendguard.io";
 
     if (!body.name || !body.cap) {
       return NextResponse.json(
@@ -48,8 +56,8 @@ export async function POST(
         windowSeconds: body.windowSeconds ? BigInt(body.windowSeconds) : 86400n,
         assetId: body.assetId || "USDC",
       },
-      actorRole,
-      actorEmail
+      auth.actor.role,
+      auth.actor.email
     );
 
     return NextResponse.json(

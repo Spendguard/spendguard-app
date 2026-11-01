@@ -1,14 +1,19 @@
 /**
  * API route for treasury accounts management.
  *
- * GET  /api/accounts — list all treasury accounts (supports status, type, search filters)
- * GET  /api/accounts?address=G...&alerts=true — alias: returns alerts for that address
- * GET  /api/accounts?address=G...&events=true — alias: returns live ingested settlement events
+ * GET  /api/accounts — list the treasury accounts the signed-in user belongs to
+ * GET  /api/accounts?address=G...&alerts=true — alias: alerts for that address
+ * GET  /api/accounts?address=G...&events=true — alias: ingested events for it
  * POST /api/accounts — create a new treasury account
+ *
+ * Every response is scoped to the session: previously any anonymous caller
+ * could enumerate every treasury in the deployment, and read any address's
+ * settlement events and alerts.
  */
 
 import { NextResponse } from "next/server";
 import { AccountService } from "@/lib/services/account-service";
+import { resolveIdentity, canReadAddress } from "@/lib/auth/session";
 import type { AccountType, AccountStatus } from "@spendguard/sdk";
 import postgres from "postgres";
 
@@ -25,6 +30,12 @@ function getDb(): postgres.Sql | null {
 }
 
 export async function GET(request: Request): Promise<NextResponse> {
+  const auth = await resolveIdentity(request);
+  if ("failure" in auth) {
+    return NextResponse.json({ error: auth.failure.error }, { status: auth.failure.status });
+  }
+  const email = auth.session.email;
+
   try {
     const { searchParams } = new URL(request.url);
 
@@ -34,6 +45,15 @@ export async function GET(request: Request): Promise<NextResponse> {
     const wantsEvents = searchParams.get("events") === "true";
     const wantsAlerts = searchParams.get("alerts") === "true";
     const address = searchParams.get("address");
+
+    if ((wantsEvents || wantsAlerts) && address) {
+      if (!(await canReadAddress(email, address))) {
+        return NextResponse.json(
+          { error: "Not a member of this account" },
+          { status: 403 }
+        );
+      }
+    }
 
     if (wantsEvents && address) {
       const db = getDb();
@@ -132,7 +152,7 @@ export async function GET(request: Request): Promise<NextResponse> {
     const type = (searchParams.get("type") as AccountType) || undefined;
     const search = searchParams.get("search") || undefined;
 
-    const accounts = await AccountService.listAccounts({ status, type, search });
+    const accounts = await AccountService.listAccountsForMember(email, { status, type, search });
     return NextResponse.json(accounts);
   } catch (err) {
     console.error("GET /api/accounts error:", err);
@@ -144,6 +164,11 @@ export async function GET(request: Request): Promise<NextResponse> {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const auth = await resolveIdentity(request);
+  if ("failure" in auth) {
+    return NextResponse.json({ error: auth.failure.error }, { status: auth.failure.status });
+  }
+
   try {
     const body = await request.json();
 

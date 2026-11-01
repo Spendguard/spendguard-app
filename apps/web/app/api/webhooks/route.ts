@@ -4,10 +4,15 @@
  * GET  /api/webhooks — list all webhook configs (secrets masked)
  * POST /api/webhooks — create or update a webhook config
  * DELETE /api/webhooks?id=... — delete a webhook config
+ *
+ * Webhook targets are global configuration — they decide where alert payloads
+ * and a signing secret are delivered — so they are restricted to a session
+ * holding Owner or Admin on at least one treasury.
  */
 
 import { NextResponse } from "next/server";
 import postgres from "postgres";
+import { resolvePrivilegedActor } from "@/lib/auth/session";
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -26,7 +31,12 @@ function maskSecret(secret: string | null): string | null {
 
 // ── GET ───────────────────────────────────────────────────────────────
 
-export async function GET(): Promise<NextResponse> {
+export async function GET(request: Request): Promise<NextResponse> {
+  const auth = await resolvePrivilegedActor(request);
+  if ("failure" in auth) {
+    return NextResponse.json({ error: auth.failure.error }, { status: auth.failure.status });
+  }
+
   try {
     const sql = getDb();
 
@@ -60,6 +70,11 @@ export async function GET(): Promise<NextResponse> {
 // ── POST ──────────────────────────────────────────────────────────────
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const auth = await resolvePrivilegedActor(request);
+  if ("failure" in auth) {
+    return NextResponse.json({ error: auth.failure.error }, { status: auth.failure.status });
+  }
+
   try {
     const body = (await request.json()) as {
       id?: string;
@@ -166,6 +181,11 @@ export async function POST(request: Request): Promise<NextResponse> {
 // ── DELETE ────────────────────────────────────────────────────────────
 
 export async function DELETE(request: Request): Promise<NextResponse> {
+  const auth = await resolvePrivilegedActor(request);
+  if ("failure" in auth) {
+    return NextResponse.json({ error: auth.failure.error }, { status: auth.failure.status });
+  }
+
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");

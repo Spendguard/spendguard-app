@@ -15,6 +15,7 @@
 
 import { NextResponse } from "next/server";
 import { SorobanClient, PolicyReader } from "@spendguard/sdk";
+import { resolveIdentity, canReadAddress } from "@/lib/auth/session";
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -27,6 +28,11 @@ function requireEnv(name: string): string {
 // ── GET ───────────────────────────────────────────────────────────────
 
 export async function GET(request: Request): Promise<NextResponse> {
+  const auth = await resolveIdentity(request);
+  if ("failure" in auth) {
+    return NextResponse.json({ error: auth.failure.error }, { status: auth.failure.status });
+  }
+
   try {
     const { searchParams } = new URL(request.url);
     const address = searchParams.get("address");
@@ -37,6 +43,12 @@ export async function GET(request: Request): Promise<NextResponse> {
         { error: "Missing required query param: address" },
         { status: 400 },
       );
+    }
+
+    // Without this gate the route is an unauthenticated proxy onto the
+    // deployment's Soroban RPC endpoint for any address a caller picks.
+    if (!(await canReadAddress(auth.session.email, address))) {
+      return NextResponse.json({ error: "Not a member of this account" }, { status: 403 });
     }
 
     const rpcUrl = requireEnv("SOROBAN_RPC_URL");

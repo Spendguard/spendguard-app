@@ -4,12 +4,12 @@ import React, { useEffect, useState, use } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAccount } from "@/context/AccountContext";
-import { hasPermission, AccountRole, AccountSettings } from "@spendguard/sdk";
+import { AccountSettings } from "@spendguard/sdk";
 
 export default function SettingsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
-  const { userRole, refreshAccounts } = useAccount();
+  const { userRole, refreshAccounts, can } = useAccount();
 
   const [, setSettings] = useState<AccountSettings | null>(null);
   const [webhookUrl, setWebhookUrl] = useState("");
@@ -22,8 +22,8 @@ export default function SettingsPage({ params }: { params: Promise<{ id: string 
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  const canEdit = hasPermission(userRole as AccountRole, "account:edit");
-  const canArchive = hasPermission(userRole as AccountRole, "account:archive");
+  const canEdit = can("account:edit");
+  const canArchive = can("account:archive");
 
   useEffect(() => {
     async function loadSettings() {
@@ -68,8 +68,6 @@ export default function SettingsPage({ params }: { params: Promise<{ id: string 
           multisigThreshold: Number(multisigThreshold),
           notificationEmail,
           autoLockOnBreach,
-          actorRole: userRole,
-          actorEmail: "user@spendguard.io",
         }),
       });
 
@@ -89,7 +87,7 @@ export default function SettingsPage({ params }: { params: Promise<{ id: string 
   const handleArchive = async () => {
     if (!confirm("Are you sure you want to archive this treasury account?")) return;
     try {
-      const res = await fetch(`/api/accounts/${id}?action=archive&actorRole=${userRole}`, {
+      const res = await fetch(`/api/accounts/${id}?action=archive`, {
         method: "DELETE",
       });
       if (res.ok) {

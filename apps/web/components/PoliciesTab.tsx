@@ -2,7 +2,6 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { useAccount } from "@/context/AccountContext";
-import { hasPermission, AccountRole } from "@spendguard/sdk";
 
 interface PolicyItem {
   id: string;
@@ -15,7 +14,7 @@ interface PolicyItem {
 }
 
 export function PoliciesTab({ accountId }: { accountId: string }) {
-  const { userRole } = useAccount();
+  const { can } = useAccount();
   const [policies, setPolicies] = useState<PolicyItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -27,7 +26,7 @@ export function PoliciesTab({ accountId }: { accountId: string }) {
   const [assetId] = useState("USDC");
   const [submitting, setSubmitting] = useState(false);
 
-  const canManage = hasPermission(userRole as AccountRole, "policies:manage");
+  const canManage = can("policies:manage");
 
   const loadPolicies = useCallback(async () => {
     try {
@@ -64,8 +63,6 @@ export function PoliciesTab({ accountId }: { accountId: string }) {
           cap: capInStroops,
           windowSeconds: seconds,
           assetId,
-          actorRole: userRole,
-          actorEmail: "user@spendguard.io",
         }),
       });
 

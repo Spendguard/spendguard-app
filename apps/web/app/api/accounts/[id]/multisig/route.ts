@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { AccountService } from "@/lib/services/account-service";
-import type { AccountRole } from "@spendguard/sdk";
+import { resolveActor } from "@/lib/auth/session";
 
 export async function GET(
   request: Request,
@@ -8,6 +8,11 @@ export async function GET(
 ): Promise<NextResponse> {
   try {
     const { id } = await params;
+    const auth = await resolveActor(request, id);
+    if ("failure" in auth) {
+      return NextResponse.json({ error: auth.failure.error }, { status: auth.failure.status });
+    }
+
     const proposals = await AccountService.getMultiSigProposals(id);
     const serialized = proposals.map((p) => ({
       ...p,
@@ -28,9 +33,12 @@ export async function POST(
 ): Promise<NextResponse> {
   try {
     const { id } = await params;
+    const auth = await resolveActor(request, id);
+    if ("failure" in auth) {
+      return NextResponse.json({ error: auth.failure.error }, { status: auth.failure.status });
+    }
+
     const body = await request.json();
-    const actorRole = (body.actorRole as AccountRole) || "Finance Manager";
-    const actorEmail = (body.actorEmail as string) || "finance@spendguard.io";
 
     if (!body.title || !body.amount || !body.recipient) {
       return NextResponse.json(
@@ -48,8 +56,8 @@ export async function POST(
         recipient: body.recipient,
         requiredApprovals: body.requiredApprovals ? Number(body.requiredApprovals) : 2,
       },
-      actorRole,
-      actorEmail
+      auth.actor.role,
+      auth.actor.email
     );
 
     return NextResponse.json(
@@ -68,27 +76,35 @@ export async function POST(
 }
 
 export async function PATCH(
-  request: Request
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
+  const { id } = await params;
+  const auth = await resolveActor(request, id);
+  if ("failure" in auth) {
+    return NextResponse.json({ error: auth.failure.error }, { status: auth.failure.status });
+  }
+
   try {
     const body = await request.json();
-    const actorRole = (body.actorRole as AccountRole) || "Approver";
 
-    if (!body.proposalId || !body.approverEmail || !body.decision) {
+    if (!body.proposalId || !body.decision) {
       return NextResponse.json(
-        { error: "Missing required fields: proposalId, approverEmail, decision" },
+        { error: "Missing required fields: proposalId, decision" },
         { status: 400 }
       );
     }
 
+    // The approver is whoever is signed in. Trusting body.approverEmail let any
+    // caller cast a vote in someone else's name and double-count their own.
     const updatedProposal = await AccountService.submitApproval(
       body.proposalId,
       {
-        approverEmail: body.approverEmail,
+        approverEmail: auth.actor.email,
         decision: body.decision,
         note: body.note,
       },
-      actorRole
+      auth.actor.role
     );
 
     return NextResponse.json({

@@ -14,6 +14,7 @@
 
 import { NextResponse } from "next/server";
 import postgres from "postgres";
+import { resolveIdentity, canReadAddress } from "@/lib/auth/session";
 
 // ── DB helper ─────────────────────────────────────────────────────────
 
@@ -30,6 +31,11 @@ function getDb(): postgres.Sql | null {
 // ── GET ───────────────────────────────────────────────────────────────
 
 export async function GET(request: Request): Promise<NextResponse> {
+  const auth = await resolveIdentity(request);
+  if ("failure" in auth) {
+    return NextResponse.json({ error: auth.failure.error }, { status: auth.failure.status });
+  }
+
   try {
     const { searchParams } = new URL(request.url);
     const address = searchParams.get("address");
@@ -40,6 +46,10 @@ export async function GET(request: Request): Promise<NextResponse> {
         { error: "Missing required query param: address" },
         { status: 400 },
       );
+    }
+
+    if (!(await canReadAddress(auth.session.email, address))) {
+      return NextResponse.json({ error: "Not a member of this account" }, { status: 403 });
     }
 
     const db = getDb();

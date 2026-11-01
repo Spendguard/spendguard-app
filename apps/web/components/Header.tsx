@@ -9,7 +9,7 @@ import { ThemeToggle } from "./ThemeToggle";
 
 export function Header() {
   const pathname = usePathname();
-  const { activeAccount, userRole, setUserRole } = useAccount();
+  const { activeAccount, userRole, session, signOut } = useAccount();
 
   const navItems = [
     { name: "Overview", href: activeAccount ? `/accounts/${activeAccount.id}` : "/" },
@@ -70,21 +70,25 @@ export function Header() {
           {/* Theme toggle */}
           <ThemeToggle />
 
-          {/* RBAC Role Switcher Simulator */}
-          <div className="hidden sm:flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900/60 px-2 py-1">
-            <span className="text-[11px] text-zinc-500 font-medium">Role:</span>
-            <select
-              value={userRole}
-              onChange={(e) => setUserRole(e.target.value)}
-              className="bg-transparent text-xs font-semibold text-zinc-200 focus:outline-none cursor-pointer"
-            >
-              <option value="Owner" className="bg-zinc-900 text-purple-300">Owner</option>
-              <option value="Admin" className="bg-zinc-900 text-emerald-300">Admin</option>
-              <option value="Finance Manager" className="bg-zinc-900 text-blue-300">Finance Manager</option>
-              <option value="Approver" className="bg-zinc-900 text-amber-300">Approver</option>
-              <option value="Viewer" className="bg-zinc-900 text-zinc-400">Viewer</option>
-            </select>
-          </div>
+          {/* Signed-in identity. The role is resolved by the server from this
+              user's membership on the active account — it is displayed here,
+              not chosen. */}
+          {session && (
+            <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/60 px-2 py-1">
+              <div className="flex flex-col leading-tight">
+                <span className="text-[11px] font-semibold text-zinc-200">
+                  {userRole ?? "No role on this account"}
+                </span>
+                <span className="text-[10px] text-zinc-500">{session.email}</span>
+              </div>
+              <button
+                onClick={() => void signOut()}
+                className="rounded-md border border-zinc-700 px-2 py-0.5 text-[10px] font-medium text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
+              >
+                Sign out
+              </button>
+            </div>
+          )}
 
           {/* Account Switcher */}
           <AccountSwitcher />
