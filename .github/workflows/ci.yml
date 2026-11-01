@@ -34,3 +34,8 @@ jobs:
 
       - name: Test (all workspaces)
         run: npm test --workspaces --if-present
+
+      # Typecheck covers the SDK, but nothing proved the indexer or the
+      # production web bundle actually compile until this step existed.
+      - name: Build (sdk, indexer, web)
+        run: npm run build

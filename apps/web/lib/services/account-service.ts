@@ -214,9 +214,32 @@ class MemoryStore {
       });
     }
   }
+
+  /** Restore the store to its freshly-seeded state, discarding all mutations. */
+  reset() {
+    this.accounts.clear();
+    this.members.clear();
+    this.policies.clear();
+    this.budgets.clear();
+    this.multisig.clear();
+    this.auditLogs.clear();
+    this.settings.clear();
+    this.seedDefaults();
+  }
 }
 
 const memoryStore = new MemoryStore();
+
+/**
+ * Restore the in-memory demo store to its seeded state.
+ *
+ * The store is a module singleton, so without this the suites that create
+ * accounts would leak that state into later suites and assert against each
+ * other's leftovers. Intended for tests; production code never calls it.
+ */
+export function resetMemoryStore(): void {
+  memoryStore.reset();
+}
 
 // ── Database Helper ───────────────────────────────────────────────────
 
