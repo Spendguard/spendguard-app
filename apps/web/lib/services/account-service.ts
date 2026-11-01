@@ -16,6 +16,18 @@ import {
 
 // ── In-Memory Fallback Store for scaling & DB independence ────────────
 
+/** An `account_members` row, in the shape the SDK type carries. */
+function memberFromRow(row: Record<string, unknown>): AccountMember {
+  return {
+    id: row.id as string,
+    accountId: row.account_id as string,
+    email: row.email as string,
+    name: row.name as string,
+    role: row.role as AccountRole,
+    addedAt: (row.added_at as Date).toISOString(),
+  };
+}
+
 class MemoryStore {
   accounts: Map<string, TreasuryAccount> = new Map();
   members: Map<string, AccountMember[]> = new Map(); // accountId -> members
@@ -466,12 +478,37 @@ export class AccountService {
           INSERT INTO treasury_accounts (id, name, description, address, type, status, context_rule_id, created_at, updated_at)
           VALUES (${newAccount.id}, ${newAccount.name}, ${newAccount.description}, ${newAccount.address}, ${newAccount.type}, ${newAccount.status}, ${newAccount.contextRuleId}, ${now}, ${now})
         `;
+        await this.persistMember(ownerMember);
       } catch (err) {
         console.warn("DB insert failed, stored in memory:", err);
       }
     }
 
     return newAccount;
+  }
+
+  /**
+   * Write one membership row.
+   *
+   * Separate from the callers because the same row is what three different
+   * flows mutate — the owner added at creation, an invitation, a role change —
+   * and `getMembers` reads all of them back from the database.
+   */
+  private static async persistMember(member: {
+    accountId: string;
+    email: string;
+    name: string;
+    role: AccountRole;
+  }): Promise<void> {
+    const db = getDb();
+    if (!db) return;
+    await db`
+      INSERT INTO account_members (account_id, email, name, role)
+      VALUES (${member.accountId}, ${member.email}, ${member.name}, ${member.role})
+      ON CONFLICT (account_id, email) DO UPDATE SET
+        name = EXCLUDED.name,
+        role = EXCLUDED.role
+    `;
   }
 
   static async updateAccount(
@@ -541,6 +578,27 @@ export class AccountService {
   static async getMembers(accountId: string): Promise<AccountMember[]> {
     const account = await this.getAccountById(accountId);
     if (!account) return [];
+
+    // Membership is what RBAC is resolved against — `lib/auth/session.ts` asks
+    // this method for the role of every request, and the session route asks it
+    // who may sign in at all. Answering from the process's memory while
+    // `listAccounts` answers from the database means an account that exists on
+    // the chain side has no members on the auth side, so its own owner cannot
+    // open it.
+    const db = getDb();
+    if (db) {
+      try {
+        const rows = await db`
+          SELECT id, account_id, email, name, role, added_at
+          FROM account_members
+          WHERE account_id = ${account.id}
+          ORDER BY added_at
+        `;
+        return rows.map((r) => memberFromRow(r));
+      } catch (err) {
+        console.warn("DB member query failed, using memory store:", err);
+      }
+    }
     return memoryStore.members.get(account.id) || [];
   }
 
@@ -557,7 +615,7 @@ export class AccountService {
     const account = await this.getAccountById(accountId);
     if (!account) throw new Error("Account not found");
 
-    const existingMembers = memoryStore.members.get(account.id) || [];
+    const existingMembers = await this.getMembers(account.id);
     if (existingMembers.some((m) => m.email.toLowerCase() === data.email.toLowerCase())) {
       throw new Error(`Member with email ${data.email} already exists in this account`);
     }
@@ -571,8 +629,14 @@ export class AccountService {
       addedAt: new Date().toISOString(),
     };
 
-    existingMembers.push(newMember);
-    memoryStore.members.set(account.id, existingMembers);
+    // Write the database first: with one configured it is what `getMembers`
+    // answers from, so a membership that reached only this process's memory
+    // would be invisible to the next request — including the next sign-in.
+    await this.persistMember(newMember);
+
+    const cached = memoryStore.members.get(account.id) || [];
+    cached.push(newMember);
+    memoryStore.members.set(account.id, cached);
 
     await this.addAuditLog(
       account.id,
@@ -598,12 +662,19 @@ export class AccountService {
     const account = await this.getAccountById(accountId);
     if (!account) throw new Error("Account not found");
 
-    const members = memoryStore.members.get(account.id) || [];
-    const member = members.find((m) => m.id === memberId || m.email === memberId);
+    const member = (await this.getMembers(account.id)).find(
+      (m) => m.id === memberId || m.email === memberId
+    );
     if (!member) throw new Error("Member not found");
 
-    member.role = newRole;
-    memoryStore.members.set(account.id, members);
+    // Same reason as `addMember`: the row the next request reads is the row to
+    // write. Without this, a role change is reported as successful and then the
+    // old role answers the following call.
+    await this.persistMember({ ...member, role: newRole });
+
+    const cached = memoryStore.members.get(account.id);
+    const cachedMember = cached?.find((m) => m.email === member.email);
+    if (cachedMember) cachedMember.role = newRole;
 
     await this.addAuditLog(
       account.id,
@@ -612,7 +683,7 @@ export class AccountService {
       `Updated member ${member.email} role to ${newRole}`
     );
 
-    return member;
+    return { ...member, role: newRole };
   }
 
   static async removeMember(
@@ -628,7 +699,7 @@ export class AccountService {
     const account = await this.getAccountById(accountId);
     if (!account) throw new Error("Account not found");
 
-    let members = memoryStore.members.get(account.id) || [];
+    const members = await this.getMembers(account.id);
     const target = members.find((m) => m.id === memberId || m.email === memberId);
     if (!target) throw new Error("Member not found");
 
@@ -639,8 +710,20 @@ export class AccountService {
       }
     }
 
-    members = members.filter((m) => m.id !== target.id);
-    memoryStore.members.set(account.id, members);
+    // Deleting the memory row alone would leave the database answering this
+    // member's role on the next request.
+    const db = getDb();
+    if (db) {
+      await db`
+        DELETE FROM account_members
+        WHERE account_id = ${account.id} AND email = ${target.email}
+      `;
+    }
+
+    memoryStore.members.set(
+      account.id,
+      (memoryStore.members.get(account.id) || []).filter((m) => m.email !== target.email)
+    );
 
     await this.addAuditLog(
       account.id,
