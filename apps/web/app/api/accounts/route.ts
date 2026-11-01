@@ -18,20 +18,8 @@ import { NextResponse } from "next/server";
 import { AccountService } from "@/lib/services/account-service";
 import { resolveIdentity, canReadAddress } from "@/lib/auth/session";
 import { feedUnavailable } from "@/lib/api/feed";
+import { getDb } from "@/lib/db";
 import type { AccountType, AccountStatus } from "@spendguard/sdk";
-import postgres from "postgres";
-
-// ── Helpers ───────────────────────────────────────────────────────────
-
-function getDb(): postgres.Sql | null {
-  const url = process.env.DATABASE_URL;
-  if (!url) return null;
-  try {
-    return postgres(url, { max: 2, idle_timeout: 10 });
-  } catch {
-    return null;
-  }
-}
 
 export async function GET(request: Request): Promise<NextResponse> {
   const auth = await resolveIdentity(request);
@@ -83,7 +71,6 @@ export async function GET(request: Request): Promise<NextResponse> {
             ORDER BY ingested_at DESC, ledger DESC
             LIMIT 200
           `;
-          await db.end({ timeout: 2 });
 
           const events = rows.map((r) => ({
             id: r.id as string,
@@ -101,7 +88,6 @@ export async function GET(request: Request): Promise<NextResponse> {
           return NextResponse.json(events);
         } catch (err) {
           console.error("GET /api/accounts events query failed:", err);
-          await db.end({ timeout: 2 }).catch(() => {});
           // A configured-but-unreadable database is not the same as an empty
           // one; saying so is the whole point of the 503.
           return feedUnavailable("Settlement events");
@@ -135,7 +121,6 @@ export async function GET(request: Request): Promise<NextResponse> {
             ORDER BY raised_at DESC
             LIMIT 100
           `;
-          await db.end({ timeout: 2 });
 
           const alerts = rows.map((r) => ({
             id: r.id as string,
@@ -155,7 +140,6 @@ export async function GET(request: Request): Promise<NextResponse> {
           return NextResponse.json(alerts);
         } catch (err) {
           console.error("GET /api/accounts alerts query failed:", err);
-          await db.end({ timeout: 2 }).catch(() => {});
           return feedUnavailable("Alert feed");
         }
       }
