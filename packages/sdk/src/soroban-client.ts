@@ -42,6 +42,41 @@ export interface GetEventsOptions {
   maxEvents?: number;
 }
 
+// ── Event normalization ───────────────────────────────────────────────
+
+/**
+ * Turn one RPC event record into the shape the indexer decodes.
+ *
+ * Kept as a standalone pure function so a captured chain record can be pushed
+ * through the exact same path in a test, with no server involved.
+ */
+export function normalizeContractEvent(entry: rpc.Api.EventResponse): RawContractEvent {
+  // Decode topic segments: v16 SDK returns them as xdr.ScVal[]
+  const topics: string[] = entry.topic.map((scv: xdr.ScVal) => String(scValToNative(scv)));
+
+  // Preserve the raw base64 XDR of the event value so consumers can
+  // decode the exact ScVal shape (i128, map, etc.). v16 SDK returns
+  // entry.value as xdr.ScVal; scValToNative would flatten maps and
+  // lose type information, so we keep the raw encoding.
+  let valueStr = "";
+  try {
+    valueStr = entry.value.toXDR("base64");
+  } catch {
+    valueStr = "";
+  }
+
+  return {
+    id: entry.id,
+    ledger: entry.ledger,
+    topic: topics,
+    value: valueStr,
+    contractId: entry.contractId?.toString() ?? "",
+    timestamp: entry.ledgerClosedAt
+      ? Math.floor(new Date(entry.ledgerClosedAt).getTime() / 1000)
+      : null,
+  };
+}
+
 // ── Client ────────────────────────────────────────────────────────────
 
 export class SorobanClient {
@@ -73,36 +108,7 @@ export class SorobanClient {
       limit: opts.maxEvents ?? 100,
     });
 
-    const events: RawContractEvent[] = [];
-
-    for (const entry of response.events) {
-      // Decode topic segments: v16 SDK returns them as xdr.ScVal[]
-      const topics: string[] = entry.topic.map((scv: xdr.ScVal) =>
-        String(scValToNative(scv)),
-      );
-
-      // Preserve the raw base64 XDR of the event value so consumers can
-      // decode the exact ScVal shape (i128, map, etc.). v16 SDK returns
-      // entry.value as xdr.ScVal; scValToNative would flatten maps and
-      // lose type information, so we keep the raw encoding.
-      let valueStr = "";
-      try {
-        valueStr = entry.value.toXDR("base64");
-      } catch {
-        valueStr = "";
-      }
-
-      events.push({
-        id: entry.id,
-        ledger: entry.ledger,
-        topic: topics,
-        value: valueStr,
-        contractId: entry.contractId?.toString() ?? "",
-        timestamp: entry.ledgerClosedAt
-          ? Math.floor(new Date(entry.ledgerClosedAt).getTime() / 1000)
-          : null,
-      });
-    }
+    const events: RawContractEvent[] = response.events.map(normalizeContractEvent);
 
     return {
       events,

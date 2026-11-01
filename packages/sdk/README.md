@@ -22,7 +22,7 @@ Within the SpendGuard monorepo:
 
 ## Features
 
-- 🔌 **`SorobanClient`**: Wrapper for Soroban RPC calls (`getEvents`, `getLatestLedger`, `simulateTransaction`).
+- 🔌 **`SorobanClient`**: Wrapper for Soroban RPC calls (`getEvents`, `getLatestLedger`, `simulateTransaction`). `normalizeContractEvent` is exported alongside it — the RPC record → `RawContractEvent` conversion, pure and server-free, so captured chain bytes can be replayed in a test.
 - 📜 **`PolicyReader`**: Reads live `spending_limit` policy state from deployed `policy-view-helper` smart contracts.
 - ⚡ **`xdr-helpers`**: Strongly-typed wrappers around `@stellar/stellar-sdk` XDR conversions (`nativeToScVal`, `scValToNative`, `addressToScVal`, `i128ToScVal`, `u64ToScVal`).
 - 🔐 **`permissions`**: Role-based access control engine (`hasPermission`, `getRolePermissions`) and Stellar address validator (`isValidStellarAddress`).

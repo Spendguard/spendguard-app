@@ -1,11 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { xdr, nativeToScVal, Address } from "@stellar/stellar-sdk";
+import { readFileSync } from "node:fs";
+import { xdr, nativeToScVal, scValToNative, Address } from "@stellar/stellar-sdk";
 import {
   decodeSettlementEvent,
   decodeTransferAmount,
   decodeSpendingLimitEnforced,
 } from "../src/event-poller.js";
-import type { RawContractEvent } from "@spendguard/sdk";
+import { normalizeContractEvent, type RawContractEvent } from "@spendguard/sdk";
 
 // Real testnet values used across the app.
 const USDC_TESTNET = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA";
@@ -248,28 +249,22 @@ describe("decodeSettlementEvent", () => {
   });
 });
 
-// ── Real on-chain golden fixture ──────────────────────────────────────
+// ── Real on-chain golden fixtures ─────────────────────────────────────
 //
-// TODO: golden fixture test against a real on-chain transfer event, once
-// testnet USDC has activity.
+// Two generations of fixtures live here:
 //
-// Why this is a TODO: as of 2026-07-31 the SDF testnet had ZERO
-// SEP-41-shaped (topics ["transfer", from, to]) events in the full ~7-day
-// RPC retention window. A getEvents scan with topic filter [["transfer"]]
-// across ALL contracts returned only single-topic custom events, and both
-// officially documented tokens — testnet USDC (CBIELTK6Y…) and the testnet
-// XLM SAC (CDLZFC3S…) — were idle. When USDC (or any SEP-41 token) emits a
-// real transfer, capture it and swap the fixture below for a real
-// 3-topic event to also pin the topic-decoding path against chain data.
+// 1. The one below, captured while the SDF testnet was idle (2026-07-31): a
+//    real event (contract CCKRLPKII3U47ACRGYVSNT3ZZ5AA3N63HYDIQEFTWSPWLSIAEXI2XPIB,
+//    ledger 3781099) whose VALUE is a genuine base64 ScVal map with an `amount`
+//    key — the SEP-41 map branch of decodeTransferAmount — but whose topic shape
+//    is NOT SEP-41 (single ["transfer"] topic). It pins value decoding, and that
+//    a non-settlement event is skipped rather than mis-attributed.
 //
-// The fixture below is the closest real on-chain data currently available:
-// a real testnet event (contract CCKRLPKII3U47ACRGYVSNT3ZZ5AA3N63HYDIQE
-// FTWSPWLSIAEXI2XPIB, ledger 3781099) captured via
-// soroban-testnet.stellar.org getEvents whose VALUE is a real base64 ScVal
-// map with an "amount" key — the exact branch decodeTransferAmount uses
-// for the SEP-41 map format. Its topic shape is NOT SEP-41 (single
-// ["transfer"] topic), so it exercises the value decoder only; the SEP-41
-// topic shape is covered by the encoder-built tests above.
+// 2. `fixtures/testnet-usdc-transfers.json`, captured on 2026-11-01 once Circle
+//    testnet USDC (CBIELTK6Y…) had real traffic: three SEP-41 transfer events
+//    straight from getEvents, ledger and XDR included. Those exercise the topic
+//    path the fixture below could not. See the describe block at the end of this
+//    file.
 
 const REAL_TESTNET_TRANSFER_VALUE =
   "AAAAEQAAAAEAAAADAAAADwAAAAZhbW91bnQAAAAAAAoAAAAAAAAAAAAAAAAATB62AAAADwAAAARmcm9tAAAAAQAAAA8AAAACdG8AAAAAABIAAAAAAAAAALQ+5OBjUvO04LbH1YkMWDu4sRey2ydDbmscUz4p7ds3";
@@ -279,7 +274,7 @@ const REAL_TESTNET_TRANSFER_CONTRACT =
 // Amount decoded from the real event value by scValToNative (0x4C1EB6).
 const REAL_TESTNET_TRANSFER_AMOUNT = 4988598n;
 
-describe("real on-chain golden fixture (testnet RPC)", () => {
+describe("golden fixture: real event value (2026-07 idle-testnet capture)", () => {
   it("decodes a real on-chain transfer VALUE (map format with amount)", () => {
     expect(decodeTransferAmount(REAL_TESTNET_TRANSFER_VALUE)).toBe(
       REAL_TESTNET_TRANSFER_AMOUNT,
@@ -296,5 +291,127 @@ describe("real on-chain golden fixture (testnet RPC)", () => {
       timestamp: null,
     };
     expect(decodeSettlementEvent(raw, new Map<string, number>())).toBeNull();
+  });
+});
+
+// ── Captured chain records, run through the real ingestion path ───────
+
+type CapturedEvent = {
+  type: "contract";
+  ledger: number;
+  ledgerClosedAt: string;
+  id: string;
+  operationIndex: number;
+  transactionIndex: number;
+  txHash: string;
+  /** base64 ScVal per topic, exactly as the RPC sent them */
+  topic: string[];
+  /** base64 ScVal */
+  value: string;
+  contractId: string;
+};
+
+const capturedFixture = JSON.parse(
+  readFileSync(new URL("./fixtures/testnet-usdc-transfers.json", import.meta.url), "utf8"),
+) as {
+  provenance: { contractId: string; asset: string; capturedAt: string };
+  events: CapturedEvent[];
+};
+
+/**
+ * Push a captured RPC record through `normalizeContractEvent` — the same
+ * conversion `SorobanClient.getEvents` performs — without a server.
+ */
+function normalize(entry: CapturedEvent): RawContractEvent {
+  return normalizeContractEvent({
+    ...entry,
+    topic: entry.topic.map((t) => xdr.ScVal.fromXDR(t, "base64")),
+    value: xdr.ScVal.fromXDR(entry.value, "base64"),
+    // The SDK yields an ScAddress here and only ever calls `.toString()` on it.
+    contractId: entry.contractId as unknown as Address,
+  } as unknown as Parameters<typeof normalizeContractEvent>[0]);
+}
+
+const [WALLET_TO_CONTRACT, MUXED_I128, MUXED_MAP] = capturedFixture.events;
+const CAPTURED_CONTRACT = capturedFixture.provenance.contractId;
+
+const CAPTURED_SENDER = "GBDCULE53LUPK4XHUCXBI35MAZFQHENMZ3JRKAJS2PPYBV646M6XKVHG";
+const CAPTURED_RECEIVE_CONTRACT = "CAVICL644SJP472RBLELX2BLIXBXWPRKQL4N3E7S3YZR4BB3ERJC4XTY";
+const CAPTURED_MUXED_SENDER = "LBGND5W67ORDP3WLYX7P4JM7RHV4JNPN2SIRNPVVKNWEANH4JDLD7Q7I";
+const CAPTURED_WALLET = "GAVNBQ77LZVBWRZ5AWHGINDFHZ63QZB335H7JKTTTCRPEIFCRMSHRSBY";
+const CAPTURED_AT = Math.floor(Date.parse("2026-10-27T12:02:50Z") / 1000);
+
+describe("golden fixtures: real testnet USDC transfer events (captured 2026-11-01)", () => {
+  it("decodes the four SEP-41 topics the RPC actually sends", () => {
+    const raw = normalize(WALLET_TO_CONTRACT);
+
+    expect(raw.topic).toEqual([
+      "transfer",
+      CAPTURED_SENDER,
+      CAPTURED_RECEIVE_CONTRACT,
+      capturedFixture.provenance.asset,
+    ]);
+    expect(raw.id).toBe("0023260653816963072-0000000001");
+    expect(raw.ledger).toBe(5415793);
+    expect(raw.contractId).toBe(CAPTURED_CONTRACT);
+    expect(raw.timestamp).toBe(CAPTURED_AT);
+    // The value survives normalization byte for byte. scValToNative would have
+    // flattened it, and the amount decoder needs the original ScVal shape.
+    expect(raw.value).toBe(WALLET_TO_CONTRACT.value);
+  });
+
+  it("turns a captured transfer into a settlement event", () => {
+    const settlement = decodeSettlementEvent(
+      normalize(WALLET_TO_CONTRACT),
+      new Map([[CAPTURED_SENDER, 1]]),
+    );
+
+    expect(settlement).toEqual({
+      id: "0023260653816963072-0000000001",
+      ledger: 5415793,
+      timestamp: CAPTURED_AT,
+      account: CAPTURED_SENDER,
+      sourceContractId: CAPTURED_CONTRACT,
+      amountSpent: 946360n,
+      contextRuleId: 1,
+      reference: CAPTURED_RECEIVE_CONTRACT,
+    });
+  });
+
+  it("still ignores a captured transfer whose sender is not monitored", () => {
+    expect(decodeSettlementEvent(normalize(WALLET_TO_CONTRACT), new Map())).toBeNull();
+  });
+
+  it("reads both SEP-41 value formats of one real settlement", () => {
+    // A single transaction emitted both legs: the outgoing one with a plain
+    // i128 amount, the incoming one as the map format carrying `to_muxed_id`.
+    expect(MUXED_I128.txHash).toBe(MUXED_MAP.txHash);
+    expect(decodeTransferAmount(MUXED_I128.value)).toBe(1578241808n);
+    expect(decodeTransferAmount(MUXED_MAP.value)).toBe(1578241808n);
+
+    const mapValue = scValToNative(xdr.ScVal.fromXDR(MUXED_MAP.value, "base64")) as {
+      amount: bigint;
+      to_muxed_id: string;
+    };
+    expect(mapValue.amount).toBe(1578241808n);
+    expect(mapValue.to_muxed_id).toBe("trying out Stellarcarbon");
+  });
+
+  it("attributes a muxed-account leg by the address string the chain sent", () => {
+    const raw = normalize(MUXED_I128);
+    expect(raw.topic[1]).toBe(CAPTURED_MUXED_SENDER);
+    expect(raw.topic[2]).toBe(CAPTURED_WALLET);
+
+    expect(decodeSettlementEvent(raw, new Map([[CAPTURED_MUXED_SENDER, 3]]))).toMatchObject({
+      account: CAPTURED_MUXED_SENDER,
+      amountSpent: 1578241808n,
+      contextRuleId: 3,
+      reference: CAPTURED_WALLET,
+    });
+
+    // The L… form is what arrives in topic[1]. A monitored-accounts table keyed
+    // by the underlying G… account does not match it, so the leg is skipped
+    // rather than attributed to an account that did not spend.
+    expect(decodeSettlementEvent(raw, new Map([[CAPTURED_WALLET, 3]]))).toBeNull();
   });
 });
