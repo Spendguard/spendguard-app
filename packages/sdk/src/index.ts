@@ -1,4 +1,4 @@
-export { SorobanClient } from "./soroban-client.js";
+export { SorobanClient, normalizeContractEvent } from "./soroban-client.js";
 export type { SorobanClientConfig, ContractEventFilter, GetEventsOptions } from "./soroban-client.js";
 
 export { PolicyReader, PolicyReaderError } from "./policy-reader.js";

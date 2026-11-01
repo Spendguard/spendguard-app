@@ -1,0 +1,64 @@
+{
+  "provenance": {
+    "network": "Test SDF Network ; September 2015",
+    "rpcUrl": "https://soroban-testnet.stellar.org",
+    "contractId": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+    "asset": "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+    "capturedAt": "2026-11-01",
+    "capturedVia": "soroban-rpc getEvents { startLedger: 5415790, endLedger: 5415805, filters: [{ type: \"contract\", contractIds: [<USDC>] }] }",
+    "note": "Every field below is exactly what the RPC returned, including ledger, paging id, transaction hash and the base64 ScVal encodings of each topic and of the event value. Nothing here is hand-constructed: these are three real Circle testnet-USDC settlement events, two of them emitted by the same transaction (one in the plain i128 value format, one in the SEP-41 map format carrying to_muxed_id)."
+  },
+  "events": [
+    {
+      "type": "contract",
+      "ledger": 5415793,
+      "ledgerClosedAt": "2026-10-27T12:02:50Z",
+      "id": "0023260653816963072-0000000001",
+      "operationIndex": 0,
+      "transactionIndex": 14,
+      "txHash": "8df5e5bd01c576ab54981beac86154b0a3363f406c8635d05d3adecb8604f678",
+      "topic": [
+        "AAAADwAAAAh0cmFuc2Zlcg==",
+        "AAAAEgAAAAAAAAAARiosndro9XLnoK4Ub6wGSwORrM7TFQEy09+A19zzPXU=",
+        "AAAAEgAAAAEqgS/c5JL+f1EKyLvoK0XDez4qgvjdk/LeMx4EOyRSLg==",
+        "AAAADgAAAD1VU0RDOkdCQkQ0N0lGNkxXSzdQN01ERVZTQ1dSN0RQVVdWM05ZM0RUUUVWRkw0TkFUNEFRSDNaTExGTEE1AAAA"
+      ],
+      "value": "AAAACgAAAAAAAAAAAAAAAAAOcLg=",
+      "contractId": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA"
+    },
+    {
+      "type": "contract",
+      "ledger": 5415799,
+      "ledgerClosedAt": "2026-10-27T12:03:20Z",
+      "id": "0023260679586713602-0000000001",
+      "operationIndex": 2,
+      "transactionIndex": 1,
+      "txHash": "d495c381d5cb784e9f54270e7658631ea57047b9168154b08ba24a120b732035",
+      "topic": [
+        "AAAADwAAAAh0cmFuc2Zlcg==",
+        "AAAAEgAAAARM0fbe+6I37svF/v4ln4nrxLXt1JEWvrVTbEA0/EjWPw==",
+        "AAAAEgAAAAAAAAAAKtDD/15qG0c9BY5kNGU+fbhkO99P9KpzmKLyIKKLJHg=",
+        "AAAADgAAAD1VU0RDOkdCQkQ0N0lGNkxXSzdQN01ERVZTQ1dSN0RQVVdWM05ZM0RUUUVWRkw0TkFUNEFRSDNaTExGTEE1AAAA"
+      ],
+      "value": "AAAACgAAAAAAAAAAAAAAAF4SDxA=",
+      "contractId": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA"
+    },
+    {
+      "type": "contract",
+      "ledger": 5415799,
+      "ledgerClosedAt": "2026-10-27T12:03:20Z",
+      "id": "0023260679586713602-0000000002",
+      "operationIndex": 2,
+      "transactionIndex": 1,
+      "txHash": "d495c381d5cb784e9f54270e7658631ea57047b9168154b08ba24a120b732035",
+      "topic": [
+        "AAAADwAAAAh0cmFuc2Zlcg==",
+        "AAAAEgAAAAAAAAAAKtDD/15qG0c9BY5kNGU+fbhkO99P9KpzmKLyIKKLJHg=",
+        "AAAAEgAAAAAAAAAAhqe/deVRhseymJC5a6j3VBZzk5pAiHDoDArdLInR1dU=",
+        "AAAADgAAAD1VU0RDOkdCQkQ0N0lGNkxXSzdQN01ERVZTQ1dSN0RQVVdWM05ZM0RUUUVWRkw0TkFUNEFRSDNaTExGTEE1AAAA"
+      ],
+      "value": "AAAAEQAAAAEAAAACAAAADwAAAAZhbW91bnQAAAAAAAoAAAAAAAAAAAAAAABeEg8QAAAADwAAAAt0b19tdXhlZF9pZAAAAAAOAAAAGHRyeWluZyBvdXQgU3RlbGxhcmNhcmJvbg==",
+      "contractId": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA"
+    }
+  ]
+}

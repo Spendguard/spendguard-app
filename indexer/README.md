@@ -110,6 +110,29 @@ npm run test
 
 ---
 
+## Golden fixtures
+
+`test/fixtures/testnet-usdc-transfers.json` stores three real Circle testnet-USDC transfer events (ledger 5415793 / 5415799, captured 2026-11-01) exactly as `getEvents` returned them: paging id, transaction hash, and the base64 `ScVal` of every topic and of the value. `test/event-decode.test.ts` feeds those records through `normalizeContractEvent` from `@spendguard/sdk` and `decodeSettlementEvent`, so the ingestion path is pinned against chain bytes rather than against our idea of what chain bytes look like — including the four-topic shape (`[transfer, from, to, asset]`), a settlement whose two legs use the i128 and the `to_muxed_id` map value formats, and a muxed `L…` sender.
+
+Nothing contacts the network in CI; the fixtures age only in the sense that the RPC stops serving them, not in the sense that they stop decoding. To refresh or add an event, query a public testnet RPC (retention is ~7 days) — for instance from a scratch script inside this workspace:
+
+```ts
+const client = new SorobanClient({
+  rpcUrl: "https://soroban-testnet.stellar.org",
+  networkPassphrase: "Test SDF Network ; September 2015",
+});
+const latest = await client.getLatestLedger();
+const { events } = await client.getEvents({
+  startLedger: latest - 100_000,
+  filters: [{ type: "contract", contractIds: ["CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA"] }],
+  maxEvents: 1000,
+});
+```
+
+`client.server.getEvents(…)` returns the raw SDK records if you need the base64 topic encodings; keep every encoding verbatim when pasting into the fixture file.
+
+---
+
 ## License
 
 [MIT](LICENSE)

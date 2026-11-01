@@ -14,7 +14,10 @@
  *     (testnet USDC: CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA).
  *     Event schema (SEP-41, https://github.com/stellar/stellar-protocol
  *     /blob/master/ecosystem/sep-0041.md):
- *       topics: ["transfer", from: Address, to: Address]
+ *       topics: ["transfer", from: Address, to: Address, asset: string]
+ *               (verified against captured testnet records — see
+ *               test/fixtures/testnet-usdc-transfers.json; the 4th topic is
+ *               the asset string, e.g. "USDC:GBBD47IF…")
  *       data:   amount: i128  (single-value format) or map
  *               { amount: i128, to_muxed_id: ... }
  *
@@ -163,7 +166,7 @@ export function decodeSettlementEvent(
 ): X402SettlementEvent | null {
   const eventType = raw.topic[0];
 
-  // SEP-41 transfer event: topics ["transfer", from, to]
+  // SEP-41 transfer event: topics ["transfer", from, to, asset]
   if (eventType === "transfer") {
     if (raw.topic.length < 3) {
       log("WARN", "Unexpected transfer event topic length", {

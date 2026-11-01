@@ -10,7 +10,7 @@
 [![CI](https://github.com/Spendguard/spendguard-app/actions/workflows/ci.yml/badge.svg)](https://github.com/Spendguard/spendguard-app/actions/workflows/ci.yml)
 [![Node](https://img.shields.io/badge/node-%3E%3D18.18-339933?logo=node.js&logoColor=white)](package.json)
 [![TypeScript strict](https://img.shields.io/badge/typescript-strict-3178c6?logo=typescript&logoColor=white)](tsconfig.base.json)
-[![Tests](https://img.shields.io/badge/tests-234%20passing-10b981?logo=vitest&logoColor=white)](https://github.com/Spendguard/spendguard-app/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-239%20passing-10b981?logo=vitest&logoColor=white)](https://github.com/Spendguard/spendguard-app/actions/workflows/ci.yml)
 [![Stellar & Soroban](https://img.shields.io/badge/built%20for-Stellar%20%26%20Soroban-7c3aed?logo=stellar&logoColor=white)](#architecture)
 
 </div>
@@ -214,7 +214,7 @@ DEMO_AUTH="true"
 
 ```bash
 npm run typecheck   # tsc --noEmit across all workspaces
-npm test            # Vitest suites across SDK, Indexer, and Web (234 tests)
+npm test            # Vitest suites across SDK, Indexer, and Web (239 tests)
 
 # Terminal A — indexer (watch mode)
 npm -w @spendguard/indexer run dev
@@ -278,7 +278,7 @@ CI (GitHub Actions) runs **install, typecheck, lint, tests and build** on every 
 
 ### What the SDK and indexer suites cover
 
-`packages/sdk/test` (78 cases) holds the pure logic: policy reads, permission matrix, XDR round-trips, and `webhook-target` — the destination policy itself, with a table of every address class a webhook must not receive (`169.254.169.254`, `127.0.0.0/8`, `10/8`, `172.16/12`, `192.168/16`, `100.64/10` CGNAT, multicast and reserved ranges, IPv6 loopback/ULA/link-local, `::ffff:`-mapped IPv4, plus unparseable input which fails closed) and the IPv6 parser that backs them. `indexer/test` (34 cases) covers breach detection, event decoding against a captured testnet fixture, and the dispatcher end-to-end with a stubbed resolver and fetch: a public target is delivered to with `redirect: "manual"` and the bearer header attached; a target that *resolves* to `169.254.169.254` is refused with **zero** fetch calls, so the secret never leaves the process; a hostname with one public and one internal answer is refused outright; a `302` toward an internal address is refused before that hop is contacted; and a refused dispatch never marks the alert delivered.
+`packages/sdk/test` (78 cases) holds the pure logic: policy reads, permission matrix, XDR round-trips, and `webhook-target` — the destination policy itself, with a table of every address class a webhook must not receive (`169.254.169.254`, `127.0.0.0/8`, `10/8`, `172.16/12`, `192.168/16`, `100.64/10` CGNAT, multicast and reserved ranges, IPv6 loopback/ULA/link-local, `::ffff:`-mapped IPv4, plus unparseable input which fails closed) and the IPv6 parser that backs them. `indexer/test` (39 cases) covers breach detection, the dispatcher end-to-end with a stubbed resolver and fetch: a public target is delivered to with `redirect: "manual"` and the bearer header attached; a target that *resolves* to `169.254.169.254` is refused with **zero** fetch calls, so the secret never leaves the process; a hostname with one public and one internal answer is refused outright; a `302` toward an internal address is refused before that hop is contacted; and a refused dispatch never marks the alert delivered. The event tests are the interesting ones: `fixtures/testnet-usdc-transfers.json` stores three Circle testnet-USDC transfer events exactly as `getEvents` returned them on 2026-10-27 — ledger, paging id, transaction hash and the base64 ScVal of every topic and of the value — and the suite pushes those records through `normalizeContractEvent` (the SDK's own record → `RawContractEvent` conversion, extracted from `getEvents` so chain bytes can be replayed without a server) and into `decodeSettlementEvent`. That pins the real four-topic SEP-41 shape (`[transfer, from, to, asset]`), both value formats of one settlement in a single transaction (the plain i128 leg and the map leg carrying `to_muxed_id`), a muxed `L…` sender, and the fact that an unmonitored sender is skipped rather than guessed at.
 
 ---
 
@@ -302,10 +302,11 @@ Both feeds answer **`503` when a database is configured and the query failed**, 
 
 ## Known limitations (honest)
 
-1. **Live testnet flow verified, but not yet a CI golden-fixture test.** Real SEP-41 transfers have been sent, ingested, and rendered end-to-end (transfer → indexer → Postgres → dashboard/API) against this repo's live testnet configuration. That verification is currently manual — the automated suite still relies on encode/decode round-trips plus one captured real on-chain value.
-2. **Only `spending_limit`-policy accounts are supported** so far (`simple_threshold`, `weighted_threshold` are next).
-3. **`spending_limit` is transfer-context only** — an upstream OpenZeppelin constraint, not a SpendGuard one.
-4. **The demo sign-in is identification, not authentication.** `/signin` hands out a signed session for a named email with no credential check, and is gated behind `DEMO_AUTH=true` so it cannot be mistaken for production auth. When that flag is on, the header carries a server-driven *Demo mode — identity, not authentication* badge (`GET /api/auth/session` answers `demoMode`), so a reviewer sees the caveat in the app and not only in this README. Authorization is real and server-side; the "who are you" step still needs an IdP (#10).
+1. **Chain fixtures are pinned in CI; the end-to-end run is not.** Decoding is verified against real captured testnet records — `indexer/test/fixtures/testnet-usdc-transfers.json` holds three Circle testnet-USDC transfer events as the RPC returned them (ledger, paging id, tx hash, base64 ScVal topics and values), pushed through the SDK's own normalization and the indexer's decoder in CI. What remains manual is the full loop — transfer → indexer → Postgres → dashboard/API — which needs a live indexer and database rather than fixtures.
+2. **Transfer legs paid from a muxed account (`L…`) are attributed by the exact string the chain sent.** A monitored account registered under its `G…` address therefore does not pick up a leg whose `from` topic is the `M…` form; the event is skipped rather than credited to the wrong account (pinned by the golden fixtures).
+3. **Only `spending_limit`-policy accounts are supported** so far (`simple_threshold`, `weighted_threshold` are next).
+4. **`spending_limit` is transfer-context only** — an upstream OpenZeppelin constraint, not a SpendGuard one.
+5. **The demo sign-in is identification, not authentication.** `/signin` hands out a signed session for a named email with no credential check, and is gated behind `DEMO_AUTH=true` so it cannot be mistaken for production auth. When that flag is on, the header carries a server-driven *Demo mode — identity, not authentication* badge (`GET /api/auth/session` answers `demoMode`), so a reviewer sees the caveat in the app and not only in this README. Authorization is real and server-side; the "who are you" step still needs an IdP (#10).
 
 SpendGuard is intentionally scoped to prove policy-aware, real on-chain observability first — not premature production hardening.
 
@@ -313,7 +314,6 @@ SpendGuard is intentionally scoped to prove policy-aware, real on-chain observab
 
 ## Roadmap
 
-- 🧪 Turn the verified live testnet flow into an automated golden-fixture test in CI
 - 🧩 Support additional OZ policy types (`simple_threshold`, `weighted_threshold`)
 - 🔔 PagerDuty / Slack alert sinks alongside webhooks
 - 🔐 Wire a real identity provider (OAuth / wallet sign-in) behind the session layer that now enforces authorization
