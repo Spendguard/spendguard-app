@@ -30,7 +30,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
     "test": "vitest run",
     "sync:contract-spec": "curl -fsSL https://raw.githubusercontent.com/Spendguard/spendguard-contract/master/specs/policy-view-helper.txt -o contract-spec/policy-view-helper.txt"
   },
