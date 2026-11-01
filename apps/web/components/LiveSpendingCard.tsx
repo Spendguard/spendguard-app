@@ -21,6 +21,8 @@ interface LiveAccountData {
   spendingLimitState: SpendingLimitState | null;
   /** Set when the contract could not be read; distinct from "no policy". */
   policyReadError: string | null;
+  /** Set when the helper declined to return one number for this rule. */
+  policyAmbiguous: string | null;
   fetchedAt: string;
 }
 
@@ -133,6 +135,22 @@ export function LiveSpendingCard({
           </p>
           <p className="text-[10px] text-red-400/80 mt-1 font-mono break-all">
             {data.policyReadError}
+          </p>
+          {data.latestLedger && (
+            <p className="text-[10px] text-zinc-700 mt-1 font-mono">
+              Latest ledger: #{data.latestLedger.toLocaleString()}
+            </p>
+          )}
+        </div>
+      ) : data?.policyAmbiguous ? (
+        <div className="mt-2">
+          <p className="text-2xl font-extrabold text-amber-400">—</p>
+          <p className="text-[11px] text-zinc-400 mt-1">
+            Live limit not shown — the contract answered, but not with a single
+            spending limit, so any percentage here would be invented.
+          </p>
+          <p className="text-[10px] text-amber-400/80 mt-1">
+            {data.policyAmbiguous}
           </p>
           {data.latestLedger && (
             <p className="text-[10px] text-zinc-700 mt-1 font-mono">

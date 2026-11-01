@@ -51,6 +51,20 @@ function liveState(over: Partial<SpendingLimitState> = {}): SpendingLimitState {
   };
 }
 
+/**
+ * The error a failed simulation produces, as the SDK classifies it. The
+ * variant numbers are the wire format; `packages/sdk/test/xdr-helpers.test.ts`
+ * pins them against `POLICY_VIEW_ERROR`.
+ */
+function contractError(variant: number): PolicyReaderError {
+  return new PolicyReaderError(
+    `Contract error from get_spending_limit_state: HostError: Error(Contract, #${variant})`,
+    "CONTRACT_ERROR",
+    undefined,
+    variant,
+  );
+}
+
 type Body = {
   spendingLimitState: {
     cap: string;
@@ -62,6 +76,7 @@ type Body = {
     windowStartedAtEstimate: number | null;
   } | null;
   policyReadError: string | null;
+  policyAmbiguous: string | null;
 };
 
 beforeEach(async () => {
@@ -109,16 +124,44 @@ describe("GET /api/stellar/account", () => {
     expect(body.spendingLimitState!.windowStartedAtEstimate).toBeNull();
   });
 
-  // A contract error means the account genuinely has nothing to show. This is
-  // the only path allowed to render an empty card.
-  it("treats a contract error as absence, not as a failure", async () => {
-    getSpendingLimitState.mockRejectedValue(
-      new PolicyReaderError("Contract error from get_spending_limit_state: HostError: Error(Contract, #1)", "CONTRACT_ERROR"),
-    );
+  // A contract error whose variant means "nothing to show". This is the only
+  // path allowed to render an empty card.
+  it("treats the absence variants as absence, not as a failure", async () => {
+    // #1 no spending_limit policy, #2 the address carries no such rule,
+    // #3 the rule's context cannot hold a limit — all three really are empty.
+    for (const variant of [1, 2, 3]) {
+      getSpendingLimitState.mockRejectedValue(contractError(variant));
+
+      const body = (await (await GET(request())).json()) as Body;
+      expect(body.spendingLimitState).toBeNull();
+      expect(body.policyReadError).toBeNull();
+      expect(body.policyAmbiguous).toBeNull();
+    }
+  });
+
+  // Helper v2 answers #4 when a rule carries two limits. That is not an empty
+  // account, and picking one of the two would put a guessed number on the
+  // dashboard — the mistake this branch exists to prevent.
+  it("reports #4 as ambiguity, never as an empty card", async () => {
+    getSpendingLimitState.mockRejectedValue(contractError(4));
+
+    const res = await GET(request());
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Body;
+
+    expect(body.spendingLimitState).toBeNull();
+    expect(body.policyReadError).toBeNull();
+    expect(body.policyAmbiguous).toMatch(/more than one spending limit/i);
+  });
+
+  // A variant this build has never seen is treated the same way: the honest
+  // answer is "I do not know", not "there is nothing".
+  it("reports an unrecognised variant as ambiguity too", async () => {
+    getSpendingLimitState.mockRejectedValue(contractError(7));
 
     const body = (await (await GET(request())).json()) as Body;
     expect(body.spendingLimitState).toBeNull();
-    expect(body.policyReadError).toBeNull();
+    expect(body.policyAmbiguous).toMatch(/does not recognise/);
   });
 
   // The helper cross-calls into the address it is given, so passing a plain

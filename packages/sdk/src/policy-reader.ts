@@ -18,7 +18,7 @@
 import { nativeToScVal, scValToNative, rpc } from "@stellar/stellar-sdk";
 
 import { SorobanClient } from "./soroban-client.js";
-import { decodeSpendingLimitView } from "./xdr-helpers.js";
+import { decodeSpendingLimitView, POLICY_VIEW_ERROR } from "./xdr-helpers.js";
 import type { SpendingLimitState, SpendingLimitView } from "./types.js";
 
 // ── Errors ────────────────────────────────────────────────────────────
@@ -28,6 +28,12 @@ export class PolicyReaderError extends Error {
     message: string,
     public readonly code: string,
     public readonly cause?: unknown,
+    /**
+     * The `#N` of an `Error(Contract, #N)` headline — which `PolicyViewError`
+     * variant the helper chose — and `null` for every other failure, because
+     * nothing reached the contract to answer with a variant.
+     */
+    public readonly contractErrorCode: number | null = null,
   ) {
     super(message);
     this.name = "PolicyReaderError";
@@ -35,7 +41,24 @@ export class PolicyReaderError extends Error {
 }
 
 /** The helper's `PolicyViewError` arrives as `HostError: Error(Contract, #N)`. */
-const CONTRACT_ERROR_PATTERN = /(^|\D)Error\(Contract,\s*#\d+\)/;
+const CONTRACT_ERROR_PATTERN = /(^|\D)Error\(Contract,\s*#(\d+)\)/;
+
+/**
+ * The variants that genuinely mean "this rule has no spending limit to show".
+ *
+ * `MultipleSpendingLimitPolicies` is deliberately not one of them: the helper
+ * said there is more than one limit, which is a fact about the account, not an
+ * empty account. A variant this SDK has never heard of is not one of them
+ * either, so an unreadable new code cannot quietly reappear as an empty card —
+ * the same class of bug the `HOST_ERROR` split removed.
+ */
+export function isSpendingLimitAbsence(contractErrorCode: number | null): boolean {
+  return (
+    contractErrorCode === POLICY_VIEW_ERROR.NoSpendingLimitPolicyInstalled ||
+    contractErrorCode === POLICY_VIEW_ERROR.AccountNotFound ||
+    contractErrorCode === POLICY_VIEW_ERROR.UnsupportedContextType
+  );
+}
 
 /**
  * The error string from a failed simulation is a headline plus a long
@@ -69,9 +92,10 @@ export class PolicyReader {
   /**
    * Classify a failed simulation.
    *
-   * `Error(Contract, #N)` is the helper deliberately refusing — no policy on
-   * that rule, unknown account, unsupported context type — so "there is
-   * nothing to show" is the correct reading.
+   * `Error(Contract, #N)` is the helper deliberately refusing, and the number
+   * says which way: #1/#2/#3 mean there is nothing to show, #4 means the
+   * answer is not a single limit. Callers decide with
+   * {@link isSpendingLimitAbsence} rather than matching the headline.
    *
    * Every other host error (`Error(Object, InvalidInput)` for an address that
    * is not a contract, `Error(Storage, MissingValue)`, a VM trap) means the
@@ -83,15 +107,16 @@ export class PolicyReader {
     functionName: string,
   ): PolicyReaderError {
     const headline = errorHeadline(String(response.error ?? ""));
-    const code = CONTRACT_ERROR_PATTERN.test(headline)
-      ? "CONTRACT_ERROR"
-      : "HOST_ERROR";
+    const contractError = CONTRACT_ERROR_PATTERN.exec(headline);
+    const variant = contractError?.[2];
+    const code = contractError ? "CONTRACT_ERROR" : "HOST_ERROR";
     const source = code === "CONTRACT_ERROR" ? "Contract" : "Host";
 
     return new PolicyReaderError(
       `${source} error from ${functionName}: ${headline}`,
       code,
       response.error,
+      variant === undefined ? null : Number(variant),
     );
   }
 
@@ -108,9 +133,10 @@ export class PolicyReader {
    * @returns The decoded SpendingLimitView from the contract.
    *
    * @throws PolicyReaderError with code `CONTRACT_ERROR` when the helper
-   *         answered with a `PolicyViewError` (absence), `HOST_ERROR` when the
-   *         call itself failed, and `RPC_FAILURE` / `RESTORE_REQUIRED` /
-   *         `NO_RESULT` / `NO_RETVAL` / `DECODE_ERROR` for other shapes.
+   *         answered with a `PolicyViewError`, whose variant is on
+   *         `contractErrorCode`; `HOST_ERROR` when the call itself failed; and
+   *         `RPC_FAILURE` / `RESTORE_REQUIRED` / `NO_RESULT` / `NO_RETVAL` /
+   *         `DECODE_ERROR` for other shapes.
    */
   async getSpendingLimitState(
     account: string,
