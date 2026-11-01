@@ -13,9 +13,9 @@ function state(partial: Partial<SpendingLimitState> = {}): SpendingLimitState {
     account: ACCOUNT,
     contextRuleId: RULE,
     cap: 10_000_000n,
-    windowSeconds: 17280n,
     spentInWindow: 0n,
-    windowStartedAt: 0n,
+    windowLedgers: 17_280,
+    windowStartedLedger: 0,
     utilizationPct: 0,
     ...partial,
   };

@@ -4,10 +4,12 @@ import { useEffect, useState, useCallback } from "react";
 
 interface SpendingLimitState {
   cap: string;
-  windowSeconds: string;
   spentInWindow: string;
-  windowStartedAt: string;
   utilizationPct: number;
+  windowLedgers: number;
+  windowStartedLedger: number;
+  windowSecondsEstimate: number;
+  windowStartedAtEstimate: number | null;
 }
 
 interface LiveAccountData {
@@ -17,6 +19,8 @@ interface LiveAccountData {
   network: string;
   xlmBalance: string | null;
   spendingLimitState: SpendingLimitState | null;
+  /** Set when the contract could not be read; distinct from "no policy". */
+  policyReadError: string | null;
   fetchedAt: string;
 }
 
@@ -120,6 +124,22 @@ export function LiveSpendingCard({
 
       {error ? (
         <div className="text-xs text-red-400 mt-1">{error}</div>
+      ) : data?.policyReadError ? (
+        <div className="mt-2">
+          <p className="text-2xl font-extrabold text-amber-400">!</p>
+          <p className="text-[11px] text-zinc-400 mt-1">
+            Live limit unavailable — the policy read failed, so the figures
+            below are not zero, they are unknown.
+          </p>
+          <p className="text-[10px] text-red-400/80 mt-1 font-mono break-all">
+            {data.policyReadError}
+          </p>
+          {data.latestLedger && (
+            <p className="text-[10px] text-zinc-700 mt-1 font-mono">
+              Latest ledger: #{data.latestLedger.toLocaleString()}
+            </p>
+          )}
+        </div>
       ) : data?.spendingLimitState ? (
         <>
           {/* Utilisation percentage */}
@@ -152,8 +172,17 @@ export function LiveSpendingCard({
             </div>
             <div>
               <span className="block text-zinc-600 uppercase tracking-wide text-[10px]">Window</span>
-              <span className="font-mono text-zinc-300">
-                {(Number(data.spendingLimitState.windowSeconds) / 3600).toFixed(0)}h
+              <span
+                className="font-mono text-zinc-300"
+                title="Estimated from ledger count at ~5 s per close; the contract reports ledgers, not time."
+              >
+                ~{(data.spendingLimitState.windowSecondsEstimate / 3600).toFixed(0)}h
+              </span>
+              <span className="block text-[10px] text-zinc-600 font-mono">
+                {data.spendingLimitState.windowLedgers.toLocaleString()} ledgers
+                {data.spendingLimitState.windowStartedLedger > 0
+                  ? ` · opened #${data.spendingLimitState.windowStartedLedger.toLocaleString()}`
+                  : " · no spend yet"}
               </span>
             </div>
             <div>

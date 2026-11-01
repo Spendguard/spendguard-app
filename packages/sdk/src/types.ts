@@ -46,21 +46,34 @@ export interface X402SettlementEvent {
 
 // ── Policy ────────────────────────────────────────────────────────────
 
-/** View returned by the policy-view-helper contract. */
+/**
+ * View returned by the policy-view-helper contract.
+ *
+ * Field names and ScMap keys mirror the deployed WASM's embedded spec —
+ * `cap`, `spent_in_window`, `window_ledgers`, `window_started_ledger` — so a
+ * rename on either side shows up as a decode error instead of a silent zero.
+ *
+ * The window fields are ledger-native by design: the contract hands back the
+ * policy's raw `period_ledgers` and the earliest retained `ledger_sequence`,
+ * and Soroban has no wall-clock. Anything user-facing converts through
+ * `ledger-window.ts` and labels the result an estimate.
+ */
 export interface SpendingLimitView {
   cap: bigint;
-  windowSeconds: bigint;
   spentInWindow: bigint;
-  windowStartedAt: bigint;
+  /** Rolling window length in ledgers. */
+  windowLedgers: number;
+  /** Earliest retained spending entry's ledger; `0` when the window is empty. */
+  windowStartedLedger: number;
 }
 
 export interface SpendingLimitState {
   account: string;
   contextRuleId: number;
   cap: bigint;
-  windowSeconds: bigint;
   spentInWindow: bigint;
-  windowStartedAt: bigint;
+  windowLedgers: number;
+  windowStartedLedger: number;
   /** Percentage of cap consumed (0-100). */
   utilizationPct: number;
 }

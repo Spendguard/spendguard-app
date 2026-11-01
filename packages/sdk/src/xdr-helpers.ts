@@ -54,11 +54,15 @@ export function scValToU64(scv: xdr.ScVal): bigint {
 // ── SpendingLimitView decoder ────────────────────────────────────────
 
 /**
- * Decode an ScMap returned by get_spending_limit_state into a typed view.
+ * Decode the ScMap returned by `get_spending_limit_state`.
  *
- * The contract returns a map with keys:
- *   cap (i128), window_seconds (u64), spent_in_window (i128),
- *   window_started_at (u64)
+ * The four keys are the field names in the deployed contract's embedded spec
+ * (`strings -a helper.wasm | grep window_ledgers`): `cap` and
+ * `spent_in_window` are i128 stroops, `window_ledgers` and
+ * `window_started_ledger` are u32 ledger counts / sequences.
+ *
+ * Any missing key throws rather than defaulting to zero: a contract that
+ * renamed a field must fail loudly here, not quietly report an empty window.
  */
 export function decodeSpendingLimitView(scv: xdr.ScVal): SpendingLimitView {
   // Guard on the switch first: calling scv.map() on a non-map ScVal throws
@@ -81,21 +85,40 @@ export function decodeSpendingLimitView(scv: xdr.ScVal): SpendingLimitView {
   };
 
   const capEntry = getEntry("cap");
-  const windowSecondsEntry = getEntry("window_seconds");
   const spentInWindowEntry = getEntry("spent_in_window");
-  const windowStartedAtEntry = getEntry("window_started_at");
+  const windowLedgersEntry = getEntry("window_ledgers");
+  const windowStartedLedgerEntry = getEntry("window_started_ledger");
 
-  if (!capEntry || !windowSecondsEntry || !spentInWindowEntry || !windowStartedAtEntry) {
+  if (
+    !capEntry ||
+    !spentInWindowEntry ||
+    !windowLedgersEntry ||
+    !windowStartedLedgerEntry
+  ) {
     throw new Error(
-      "SpendingLimitView ScMap is missing one or more required fields",
+      "SpendingLimitView ScMap is missing one or more required fields " +
+        "(expected cap, spent_in_window, window_ledgers, window_started_ledger)",
     );
+  }
+
+  const windowLedgers = scValToU32(windowLedgersEntry);
+  const windowStartedLedger = scValToU32(windowStartedLedgerEntry);
+  for (const [name, value] of [
+    ["window_ledgers", windowLedgers],
+    ["window_started_ledger", windowStartedLedger],
+  ] as const) {
+    if (!Number.isInteger(value) || value < 0) {
+      throw new Error(
+        `SpendingLimitView.${name} is not a u32 ledger value (got ${value})`,
+      );
+    }
   }
 
   return {
     cap: scValToI128(capEntry),
-    windowSeconds: scValToU64(windowSecondsEntry),
     spentInWindow: scValToI128(spentInWindowEntry),
-    windowStartedAt: scValToU64(windowStartedAtEntry),
+    windowLedgers,
+    windowStartedLedger,
   };
 }
 

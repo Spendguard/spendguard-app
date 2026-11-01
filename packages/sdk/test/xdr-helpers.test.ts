@@ -48,33 +48,102 @@ describe("numeric helpers", () => {
 });
 
 describe("decodeSpendingLimitView", () => {
-  function buildView(cap: bigint, windowSeconds: bigint, spent: bigint, startedAt: bigint): xdr.ScVal {
+  // The key names below are not a guess at the contract's shape — they are the
+  // field names in the deployed WASM's embedded spec, read from testnet:
+  //
+  //   stellar contract fetch \
+  //     --rpc-url https://soroban-testnet.stellar.org \
+  //     --network-passphrase "Test SDF Network ; September 2015" \
+  //     --contract-id CCAM4NRAUB6SO3XLL2SRZQEHSOUYQGDKGNPCUIQ5KKI2S6QKWC2VN6NX \
+  //     -o /tmp/helper.wasm
+  //   strings -a /tmp/helper.wasm | grep -o "cap.*window_started_ledger"
+  //   → …get_context_ruleget_spending_limit_datacapspent_in_windowwindow_ledgerswindow_started_ledger
+  //
+  // The ScMap keys a #[contracttype] struct serialises are exactly those names,
+  // so this fixture mirrors the on-chain contract, not this test file's memory
+  // of it.
+  function buildView(opts: {
+    cap: bigint;
+    spentInWindow: bigint;
+    windowLedgers: number;
+    windowStartedLedger: number;
+  }): xdr.ScVal {
     return xdr.ScVal.scvMap([
       new xdr.ScMapEntry({
         key: xdr.ScVal.scvSymbol("cap"),
-        val: nativeToScVal(cap, { type: "i128" }),
-      }),
-      new xdr.ScMapEntry({
-        key: xdr.ScVal.scvSymbol("window_seconds"),
-        val: nativeToScVal(windowSeconds, { type: "u64" }),
+        val: nativeToScVal(opts.cap, { type: "i128" }),
       }),
       new xdr.ScMapEntry({
         key: xdr.ScVal.scvSymbol("spent_in_window"),
-        val: nativeToScVal(spent, { type: "i128" }),
+        val: nativeToScVal(opts.spentInWindow, { type: "i128" }),
       }),
       new xdr.ScMapEntry({
-        key: xdr.ScVal.scvSymbol("window_started_at"),
-        val: nativeToScVal(startedAt, { type: "u64" }),
+        key: xdr.ScVal.scvSymbol("window_ledgers"),
+        val: nativeToScVal(opts.windowLedgers, { type: "u32" }),
+      }),
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol("window_started_ledger"),
+        val: nativeToScVal(opts.windowStartedLedger, { type: "u32" }),
       }),
     ]);
   }
 
-  it("decodes a complete SpendingLimitView map", () => {
-    const view = decodeSpendingLimitView(buildView(10_000_000n, 17280n, 2_500_000n, 123456789n));
-    expect(view.cap).toBe(10_000_000n);
-    expect(view.windowSeconds).toBe(17280n);
-    expect(view.spentInWindow).toBe(2_500_000n);
-    expect(view.windowStartedAt).toBe(123456789n);
+  const deployed = {
+    cap: 10_000_000n,
+    spentInWindow: 2_500_000n,
+    windowLedgers: 17_280,
+    windowStartedLedger: 123_456_789,
+  };
+
+  it("decodes the map the deployed contract returns", () => {
+    const view = decodeSpendingLimitView(buildView(deployed));
+    expect(view).toEqual({
+      cap: 10_000_000n,
+      spentInWindow: 2_500_000n,
+      windowLedgers: 17_280,
+      windowStartedLedger: 123_456_789,
+    });
+  });
+
+  it("reads a window length as a ledger count, not a duration", () => {
+    const view = decodeSpendingLimitView(buildView({ ...deployed, windowLedgers: 1 }));
+    expect(view.windowLedgers).toBe(1);
+    expect(typeof view.windowLedgers).toBe("number");
+  });
+
+  it("keeps 0 as the contract's \"no spending history yet\" encoding", () => {
+    const view = decodeSpendingLimitView(buildView({ ...deployed, windowStartedLedger: 0 }));
+    expect(view.windowStartedLedger).toBe(0);
+  });
+
+  // The decoder used to require `window_seconds` / `window_started_at` — keys
+  // the contract stopped emitting when it dropped its invented 5x ledger→
+  // seconds conversion (spendguard-contract b4bd728). Every live read failed
+  // with that mismatch while these tests still passed, because they built the
+  // map from the decoder's own assumption. This pins the shape from the
+  // outside instead.
+  it("rejects the pre-b4bd728 key names instead of decoding them", () => {
+    const stale = xdr.ScVal.scvMap([
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol("cap"),
+        val: nativeToScVal(deployed.cap, { type: "i128" }),
+      }),
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol("spent_in_window"),
+        val: nativeToScVal(deployed.spentInWindow, { type: "i128" }),
+      }),
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol("window_seconds"),
+        val: nativeToScVal(17_280n, { type: "u64" }),
+      }),
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol("window_started_at"),
+        val: nativeToScVal(1_780_000_000n, { type: "u64" }),
+      }),
+    ]);
+    expect(() => decodeSpendingLimitView(stale)).toThrow(
+      /missing one or more required fields/,
+    );
   });
 
   it("throws when a required key is missing", () => {

@@ -53,7 +53,7 @@ import { SorobanClient, PolicyReader } from "@spendguard/sdk";
 
 const client = new SorobanClient({
   rpcUrl: "https://soroban-testnet.stellar.org",
-  networkPassphrase: "Test SDF Network ; July 2015",
+  networkPassphrase: "Test SDF Network ; September 2015",
 });
 
 const reader = new PolicyReader(
@@ -69,6 +69,13 @@ const state = await reader.getSpendingLimitState(
 
 console.log(`Cap: ${state.cap}, Spent: ${state.spentInWindow}, Utilization: ${state.utilizationPct}%`);
 ```
+
+`state` carries the contract's fields unchanged: `windowLedgers` (the policy's
+rolling window in ledgers) and `windowStartedLedger` (earliest retained spend,
+`0` when the window has no history). The contract has no clock and neither does
+Soroban RPC for historical ledgers, so wall-clock figures are the caller's
+estimate — `estimateWindowSeconds()` and `estimateLedgerCloseTime()` keep the
+assumption in one place instead of dividing by 3600 in components.
 
 ### 3. Converting XDR Values Safely
 

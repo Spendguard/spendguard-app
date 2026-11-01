@@ -6,6 +6,16 @@
  * Queries the deployed policy-view-helper contract on Stellar testnet via
  * Soroban RPC. Returns the live spending limit utilisation for the account.
  *
+ * `spendingLimitState` carries the contract's ledger-native window fields
+ * (`windowLedgers`, `windowStartedLedger`) plus `*Estimate` values derived at
+ * 5 s/ledger — labelled as estimates because the contract has no clock and the
+ * RPC publishes no close time for historical ledgers.
+ *
+ * `spendingLimitState: null` with `policyReadError: null` means the contract
+ * answered and there is nothing to show. A non-null `policyReadError` means the
+ * read itself failed (RPC down, restore required, shape mismatch) — the two are
+ * never collapsed into each other.
+ *
  * Also fetches the native XLM balance from the Horizon-compatible endpoint
  * baked into the stellar-sdk Server.
  *
@@ -14,7 +24,13 @@
  */
 
 import { NextResponse } from "next/server";
-import { SorobanClient, PolicyReader } from "@spendguard/sdk";
+import {
+  SorobanClient,
+  PolicyReader,
+  PolicyReaderError,
+  estimateWindowSeconds,
+  estimateLedgerCloseTime,
+} from "@spendguard/sdk";
 import { resolveIdentity, canReadAddress } from "@/lib/auth/session";
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -65,27 +81,52 @@ export async function GET(request: Request): Promise<NextResponse> {
     // Try to read spending limit state from the on-chain contract
     let spendingLimitState: {
       cap: string;
-      windowSeconds: string;
       spentInWindow: string;
-      windowStartedAt: string;
       utilizationPct: number;
+      windowLedgers: number;
+      windowStartedLedger: number;
+      /** Display estimate — see `@spendguard/sdk` ledger-window. */
+      windowSecondsEstimate: number;
+      /** Unix seconds, or null when the window has no history (ledger 0). */
+      windowStartedAtEstimate: number | null;
     } | null = null;
+
+    // A read that failed for a reason other than "this account has no
+    // spending limit" must not be reported as absence — the card would show
+    // an empty state for what is actually an outage or a decode mismatch.
+    let policyReadError: string | null = null;
 
     try {
       const state = await reader.getSpendingLimitState(address, ruleId);
       spendingLimitState = {
         cap: state.cap.toString(),
-        windowSeconds: state.windowSeconds.toString(),
         spentInWindow: state.spentInWindow.toString(),
-        windowStartedAt: state.windowStartedAt.toString(),
         utilizationPct: state.utilizationPct,
+        windowLedgers: state.windowLedgers,
+        windowStartedLedger: state.windowStartedLedger,
+        windowSecondsEstimate: estimateWindowSeconds(state.windowLedgers),
+        windowStartedAtEstimate: estimateLedgerCloseTime(state.windowStartedLedger, {
+          ledger: latestLedger,
+          closedAtSeconds: Math.floor(Date.now() / 1000),
+        }),
       };
     } catch (err) {
-      // Account may not have a policy registered on-chain — not an error
-      console.info(
-        `No on-chain policy for ${address} rule ${ruleId}:`,
-        err instanceof Error ? err.message : String(err),
-      );
+      if (err instanceof PolicyReaderError && err.code === "CONTRACT_ERROR") {
+        // The helper answered with a `PolicyViewError`: no policy on this
+        // rule, the address is not a smart account carrying this rule, or the
+        // rule's context cannot carry a spending limit. All three are
+        // genuinely "nothing to show". A `HOST_ERROR` — the call never ran,
+        // e.g. `Error(Object, InvalidInput)` for a plain `G…` address — falls
+        // through to the failure branch instead.
+        console.info(
+          `No live spending limit for ${address} rule ${ruleId}:`,
+          err.message,
+        );
+      } else {
+        const reason = err instanceof Error ? err.message : String(err);
+        console.error(`Live policy read failed for ${address} rule ${ruleId}:`, reason);
+        policyReadError = reason;
+      }
     }
 
     // Try to fetch native XLM balance from Horizon. The Soroban RPC host
@@ -116,6 +157,7 @@ export async function GET(request: Request): Promise<NextResponse> {
       rpcUrl,
       xlmBalance,
       spendingLimitState,
+      policyReadError,
       fetchedAt: new Date().toISOString(),
     });
   } catch (err) {

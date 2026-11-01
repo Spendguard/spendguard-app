@@ -7,6 +7,10 @@
  *   - get_spending_limit_state(account, context_rule_id) -> SpendingLimitView
  *   - get_version() -> u32
  *
+ * The returned view is ledger-native (`windowLedgers`,
+ * `windowStartedLedger`); see `ledger-window.ts` for the labelled estimates
+ * the UI needs.
+ *
  * All calls are read-only simulations; no transactions are signed or
  * submitted to the network.
  */
@@ -30,6 +34,18 @@ export class PolicyReaderError extends Error {
   }
 }
 
+/** The helper's `PolicyViewError` arrives as `HostError: Error(Contract, #N)`. */
+const CONTRACT_ERROR_PATTERN = /(^|\D)Error\(Contract,\s*#\d+\)/;
+
+/**
+ * The error string from a failed simulation is a headline plus a long
+ * diagnostic-event log. Only the headline is the returned error; the rest is
+ * safe to drop from a message a caller might put on screen.
+ */
+function errorHeadline(responseError: string): string {
+  return (responseError.split("\n")[0] ?? "").trim();
+}
+
 // ── Reader ────────────────────────────────────────────────────────────
 
 export class PolicyReader {
@@ -48,17 +64,53 @@ export class PolicyReader {
     this.simulationSource = simulationSource;
   }
 
+  // ── Simulation error classification ─────────────────────────────────
+
+  /**
+   * Classify a failed simulation.
+   *
+   * `Error(Contract, #N)` is the helper deliberately refusing — no policy on
+   * that rule, unknown account, unsupported context type — so "there is
+   * nothing to show" is the correct reading.
+   *
+   * Every other host error (`Error(Object, InvalidInput)` for an address that
+   * is not a contract, `Error(Storage, MissingValue)`, a VM trap) means the
+   * call itself never ran. Coding those as `HOST_ERROR` keeps a broken
+   * integration from presenting as an empty account.
+   */
+  private simulationError(
+    response: rpc.Api.SimulateTransactionErrorResponse,
+    functionName: string,
+  ): PolicyReaderError {
+    const headline = errorHeadline(String(response.error ?? ""));
+    const code = CONTRACT_ERROR_PATTERN.test(headline)
+      ? "CONTRACT_ERROR"
+      : "HOST_ERROR";
+    const source = code === "CONTRACT_ERROR" ? "Contract" : "Host";
+
+    return new PolicyReaderError(
+      `${source} error from ${functionName}: ${headline}`,
+      code,
+      response.error,
+    );
+  }
+
   // ── get_spending_limit_state ─────────────────────────────────────────
 
   /**
    * Fetch the current spending limit state for an account + context rule.
    *
-   * @param account       - Smart account address (G…).
+   * @param account       - Smart-account contract address (C…). The helper
+   *                        cross-calls into it, so a plain `G…` account
+   *                        address is rejected by the host with
+   *                        `Error(Object, InvalidInput)`.
    * @param contextRuleId - Context rule ID (u32).
    * @returns The decoded SpendingLimitView from the contract.
    *
-   * @throws PolicyReaderError on RPC failure, contract error, or unexpected
-   *         response shape.
+   * @throws PolicyReaderError with code `CONTRACT_ERROR` when the helper
+   *         answered with a `PolicyViewError` (absence), `HOST_ERROR` when the
+   *         call itself failed, and `RPC_FAILURE` / `RESTORE_REQUIRED` /
+   *         `NO_RESULT` / `NO_RETVAL` / `DECODE_ERROR` for other shapes.
    */
   async getSpendingLimitState(
     account: string,
@@ -84,11 +136,7 @@ export class PolicyReader {
     }
 
     if (rpc.Api.isSimulationError(response)) {
-      throw new PolicyReaderError(
-        `Contract returned error: ${response.error}`,
-        "CONTRACT_ERROR",
-        response.error,
-      );
+      throw this.simulationError(response, "get_spending_limit_state");
     }
 
     if (!rpc.Api.isSimulationSuccess(response)) {
@@ -134,9 +182,9 @@ export class PolicyReader {
       account,
       contextRuleId,
       cap: view.cap,
-      windowSeconds: view.windowSeconds,
       spentInWindow: view.spentInWindow,
-      windowStartedAt: view.windowStartedAt,
+      windowLedgers: view.windowLedgers,
+      windowStartedLedger: view.windowStartedLedger,
       utilizationPct,
     };
   }
@@ -166,11 +214,7 @@ export class PolicyReader {
     }
 
     if (rpc.Api.isSimulationError(response)) {
-      throw new PolicyReaderError(
-        `Contract returned error: ${response.error}`,
-        "CONTRACT_ERROR",
-        response.error,
-      );
+      throw this.simulationError(response, "get_version");
     }
 
     if (!rpc.Api.isSimulationSuccess(response)) {
