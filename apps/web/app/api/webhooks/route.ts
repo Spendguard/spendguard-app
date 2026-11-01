@@ -7,10 +7,12 @@
  *
  * Webhook targets are global configuration — they decide where alert payloads
  * and a signing secret are delivered — so they are restricted to a session
- * holding Owner or Admin on at least one treasury.
+ * holding Owner or Admin on at least one treasury, and every URL is put through
+ * the shared destination policy (`@spendguard/sdk`) before it is stored.
  */
 
 import { NextResponse } from "next/server";
+import { checkWebhookUrlShape } from "@spendguard/sdk";
 import { resolvePrivilegedActor } from "@/lib/auth/session";
 import { getDbOrThrow } from "@/lib/db";
 
@@ -82,14 +84,15 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
     }
 
-    // Basic URL validation
-    try {
-      new URL(body.url);
-    } catch {
-      return NextResponse.json(
-        { error: "Invalid URL format" },
-        { status: 400 },
-      );
+    // Destination policy, applied at write time. The dispatcher re-checks on
+    // delivery (including DNS and every redirect hop), but a webhook that
+    // targets a metadata endpoint or a database port should never reach the
+    // table in the first place.
+    const target = checkWebhookUrlShape(body.url, {
+      allowPrivateNetworks: process.env.WEBHOOK_ALLOW_PRIVATE_NETWORKS === "true",
+    });
+    if (!target.ok) {
+      return NextResponse.json({ error: target.reason }, { status: 400 });
     }
 
     const alertLevels = body.alertLevels ?? ["near_miss", "breach"];

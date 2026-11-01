@@ -24,5 +24,20 @@ export {
 } from "./permissions.js";
 export type { Permission } from "./permissions.js";
 
+export {
+  checkWebhookUrlShape,
+  findBlockedAddress,
+  isBlockedIpAddress,
+  isIpAddressLike,
+  parseIpv4,
+  parseIpv6,
+} from "./webhook-target.js";
+export type {
+  AllowedWebhookTarget,
+  RejectedWebhookTarget,
+  WebhookTargetCheck,
+  WebhookTargetOptions,
+} from "./webhook-target.js";
+
 export type * from "./types.js";
 

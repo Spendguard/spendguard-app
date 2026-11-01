@@ -26,6 +26,7 @@ Within the SpendGuard monorepo:
 - 📜 **`PolicyReader`**: Reads live `spending_limit` policy state from deployed `policy-view-helper` smart contracts.
 - ⚡ **`xdr-helpers`**: Strongly-typed wrappers around `@stellar/stellar-sdk` XDR conversions (`nativeToScVal`, `scValToNative`, `addressToScVal`, `i128ToScVal`, `u64ToScVal`).
 - 🔐 **`permissions`**: Role-based access control engine (`hasPermission`, `getRolePermissions`) and Stellar address validator (`isValidStellarAddress`).
+- 🧱 **`webhook-target`**: The alert-webhook destination policy, kept pure (no DNS, no sockets) so the API's write-time check and the indexer's delivery-time check cannot drift apart — `checkWebhookUrlShape`, `isBlockedIpAddress`, `findBlockedAddress`, plus `parseIpv4`/`parseIpv6`.
 - 📐 **Domain Models & Types**: Interfaces for `TreasuryAccount`, `AccountMember`, `SpendingPolicy`, `Budget`, `MultiSigProposal`, `AuditLog`, `AccountSettings`, `X402SettlementEvent`, `SpendAlert`, and `WebhookConfig`.
 
 ---

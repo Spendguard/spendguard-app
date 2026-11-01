@@ -6,8 +6,17 @@
  * logged but do not block the indexer loop.
  *
  * The webhook payload is a JSON object conforming to SpendAlert.
+ *
+ * Destinations are operator-supplied and the request carries a bearer secret,
+ * so every target is checked before a socket is opened: scheme, port,
+ * special-use hostname, and — after DNS — whether the address it resolves to
+ * is routable in public. Redirects are followed manually and re-checked hop by
+ * hop, because a public host that answers `302 → http://169.254.169.254` is the
+ * same request as the one the policy already refused.
  */
 
+import { promises as dns } from "node:dns";
+import { checkWebhookUrlShape, findBlockedAddress, isIpAddressLike } from "@spendguard/sdk";
 import type { SpendAlert } from "@spendguard/sdk";
 import type { Database } from "./db.js";
 
@@ -49,15 +58,156 @@ function buildPayload(alert: SpendAlert): WebhookPayload {
   };
 }
 
+// ── Destination guard ─────────────────────────────────────────────────
+
+/** Hostname → every address it resolves to. */
+export type AddressResolver = (host: string) => Promise<string[]>;
+
+const systemResolver: AddressResolver = async (host) => {
+  const records = await dns.lookup(host, { all: true, verbatim: true });
+  return records.map((record) => record.address);
+};
+
+export interface DispatcherOptions {
+  /** Injected in tests; defaults to the system resolver. */
+  resolveAddresses?: AddressResolver;
+  /** Local development only: permit loopback and RFC 1918 targets. */
+  allowPrivateNetworks?: boolean;
+  /** Redirects followed before giving up on a target. */
+  maxRedirects?: number;
+}
+
+type DeliveryResult =
+  | { status: "delivered"; responseCode: number }
+  | { status: "refused"; reason: string }
+  | { status: "failed"; reason: string };
+
 // ── Dispatcher ────────────────────────────────────────────────────────
 
 export class AlertDispatcher {
   private readonly db: Database;
   private readonly timeoutMs: number;
+  private readonly resolveAddresses: AddressResolver;
+  private readonly allowPrivateNetworks: boolean;
+  private readonly maxRedirects: number;
 
-  constructor(db: Database, timeoutMs: number) {
+  constructor(db: Database, timeoutMs: number, options: DispatcherOptions = {}) {
     this.db = db;
     this.timeoutMs = timeoutMs;
+    this.resolveAddresses = options.resolveAddresses ?? systemResolver;
+    this.allowPrivateNetworks = options.allowPrivateNetworks ?? false;
+    this.maxRedirects = options.maxRedirects ?? 3;
+  }
+
+  /**
+   * Resolve a target and refuse it if any of its addresses is not publicly
+   * routable. A hostname that resolves to *both* a public and an internal
+   * address is refused too: the socket could land on either.
+   */
+  private async guardTarget(url: URL): Promise<string | null> {
+    const shape = checkWebhookUrlShape(url.toString(), {
+      allowPrivateNetworks: this.allowPrivateNetworks,
+    });
+    if (!shape.ok) return shape.reason;
+
+    if (this.allowPrivateNetworks) return null;
+
+    const host = url.hostname.replace(/^\[|\]$/g, "");
+    let addresses: string[];
+    try {
+      addresses = isIpAddressLike(host) ? [host] : await this.resolveAddresses(host);
+    } catch (err) {
+      return `${host} could not be resolved: ${String(err)}`;
+    }
+
+    const blocked = findBlockedAddress(addresses, {
+      allowPrivateNetworks: this.allowPrivateNetworks,
+    });
+    return blocked ? `${host} resolves to ${blocked}, which is not a public address` : null;
+  }
+
+  /**
+   * POST the payload to one endpoint, following redirects manually so each hop
+   * passes the same guard as the configured URL.
+   */
+  private async deliver(
+    startUrl: URL,
+    payload: WebhookPayload,
+    secret: string | null,
+    alertId: string
+  ): Promise<DeliveryResult> {
+    let target = startUrl;
+
+    for (let hop = 0; hop <= this.maxRedirects; hop += 1) {
+      const refusal = await this.guardTarget(target);
+      if (refusal) {
+        log("WARN", "Refused webhook target", { alertId, url: target.toString(), refusal });
+        return { status: "refused", reason: refusal };
+      }
+
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "User-Agent": "SpendGuard/0.1",
+      };
+      if (secret) headers["Authorization"] = `Bearer ${secret}`;
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
+
+      let response: Response;
+      try {
+        response = await fetch(target, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+          // Manual, never "follow": the runtime would chase a redirect past any
+          // check we could make.
+          redirect: "manual",
+        });
+      } catch (err) {
+        log("ERROR", "Failed to POST alert to webhook", {
+          alertId,
+          webhookUrl: target.toString(),
+          error: String(err),
+        });
+        return { status: "failed", reason: String(err) };
+      } finally {
+        clearTimeout(timeoutId);
+      }
+
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get("location");
+        if (!location) {
+          return { status: "failed", reason: `${response.status} redirect without a Location header` };
+        }
+        try {
+          target = new URL(location, target);
+        } catch {
+          return { status: "failed", reason: `unresolvable redirect target: ${location}` };
+        }
+        log("INFO", "Following webhook redirect", { alertId, status: response.status });
+        continue;
+      }
+
+      if (response.ok) {
+        log("INFO", "Alert dispatched to webhook", {
+          alertId,
+          webhookUrl: target.toString(),
+          status: response.status,
+        });
+        return { status: "delivered", responseCode: response.status };
+      }
+
+      log("WARN", "Webhook returned non-2xx", {
+        alertId,
+        webhookUrl: target.toString(),
+        status: response.status,
+      });
+      return { status: "failed", reason: `HTTP ${response.status}` };
+    }
+
+    return { status: "failed", reason: `more than ${this.maxRedirects} redirects` };
   }
 
   /**
@@ -96,49 +246,19 @@ export class AlertDispatcher {
     let allDelivered = true;
 
     for (const webhook of matchingWebhooks) {
+      let target: URL;
       try {
-        const headers: Record<string, string> = {
-          "Content-Type": "application/json",
-          "User-Agent": "SpendGuard/0.1",
-        };
-        if (webhook.secret) {
-          headers["Authorization"] = `Bearer ${webhook.secret}`;
-        }
-
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
-
-        const response = await fetch(webhook.url, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(payload),
-          signal: controller.signal,
-        });
-
-        clearTimeout(timeoutId);
-
-        if (response.ok) {
-          log("INFO", "Alert dispatched to webhook", {
-            alertId: alert.id,
-            webhookUrl: webhook.url,
-            status: response.status,
-          });
-        } else {
-          log("WARN", "Webhook returned non-2xx", {
-            alertId: alert.id,
-            webhookUrl: webhook.url,
-            status: response.status,
-          });
-          allDelivered = false;
-        }
-      } catch (err) {
-        log("ERROR", "Failed to POST alert to webhook", {
+        target = new URL(webhook.url);
+      } catch {
+        log("ERROR", "Webhook config URL is not a valid URL", {
           alertId: alert.id,
-          webhookUrl: webhook.url,
-          error: String(err),
         });
         allDelivered = false;
+        continue;
       }
+
+      const result = await this.deliver(target, payload, webhook.secret ?? null, alert.id);
+      if (result.status !== "delivered") allDelivered = false;
     }
 
     // Update delivery status if any webhook was called

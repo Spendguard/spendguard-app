@@ -32,11 +32,21 @@ function optionalIntEnv(name: string, defaultValue: number): number {
   return parsed;
 }
 
+function optionalBoolEnv(name: string, defaultValue: boolean): boolean {
+  const raw = process.env[name]?.trim().toLowerCase();
+  if (!raw) return defaultValue;
+  if (raw === "true" || raw === "1") return true;
+  if (raw === "false" || raw === "0") return false;
+  console.error(
+    `FATAL: Environment variable "${name}" must be true/false. Got: "${raw}"`,
+  );
+  process.exit(1);
+}
+
 /**
  * Parse a comma-separated list env var into a trimmed, non-empty string
  * array. Returns an empty array when the var is unset or blank.
- */
-function optionalListEnv(name: string): string[] {
+ */function optionalListEnv(name: string): string[] {
   const raw = process.env[name];
   if (!raw || raw.trim().length === 0) {
     return [];
@@ -65,6 +75,13 @@ export interface IndexerConfig {
   databaseUrl: string;
   nearMissThresholdPct: number;
   webhookTimeoutMs: number;
+  /**
+   * Permit webhook targets on loopback/RFC 1918 ranges. Local development
+   * only — a hosted indexer delivering alerts to `127.0.0.1` is delivering them
+   * to itself, and a hosted indexer delivering to `169.254.169.254` is an SSRF
+   * with a signing secret attached.
+   */
+  webhookAllowPrivateNetworks: boolean;
   pollIntervalMs: number;
 }
 
@@ -83,6 +100,10 @@ export function loadConfig(): IndexerConfig {
     databaseUrl: requireEnv("DATABASE_URL"),
     nearMissThresholdPct: optionalIntEnv("NEAR_MISS_THRESHOLD_PCT", 90),
     webhookTimeoutMs: optionalIntEnv("WEBHOOK_TIMEOUT_MS", 5000),
+    webhookAllowPrivateNetworks: optionalBoolEnv(
+      "WEBHOOK_ALLOW_PRIVATE_NETWORKS",
+      false,
+    ),
     pollIntervalMs: optionalIntEnv("POLL_INTERVAL_MS", 10_000),
   };
 }
