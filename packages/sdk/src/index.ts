@@ -18,6 +18,12 @@ export {
 export type { ContractErrorCode } from "./xdr-helpers.js";
 
 export {
+  ESTIMATED_LEDGER_CLOSE_SECONDS,
+  estimateWindowSeconds,
+  estimateLedgerCloseTime,
+} from "./ledger-window.js";
+
+export {
   getRolePermissions,
   hasPermission,
   isValidStellarAddress,
