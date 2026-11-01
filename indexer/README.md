@@ -88,6 +88,8 @@ A refused dispatch never marks the alert as delivered, so the next poll cycle re
 
 Setting `WEBHOOK_ALLOW_PRIVATE_NETWORKS=true` relaxes steps 1–2 for local development (delivering to `http://localhost:3000/hook`). The protocol and embedded-credential rules still apply, and a deployment that faces the internet should leave it unset.
 
+**Residual risk, stated plainly.** The address checked is not the address dialed: `fetch` resolves the hostname again when it opens the socket, so a record that flips between the check and the connection (classic DNS rebinding, or a name with a short TTL and rotating answers) can still land somewhere private. Closing that gap properly means pinning the connection to the validated IP — a custom agent, and for the web app a `dispatcher` — which this repo does not do yet. Two things make the window narrow rather than wide: the redirect hop is re-guarded, so a `302` cannot be used to walk in from a public host, and the shape check already removed the port and protocol tricks. The remaining exposure assumes an attacker controls DNS answers for a host the operator chose to trust.
+
 ---
 
 ## Build & Run
