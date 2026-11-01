@@ -24,6 +24,7 @@ function payload(over: Record<string, unknown> = {}) {
       windowStartedAtEstimate: 1_780_000_000,
     },
     policyReadError: null,
+    policyAmbiguous: null,
     fetchedAt: new Date().toISOString(),
     ...over,
   };
@@ -87,5 +88,28 @@ describe("LiveSpendingCard", () => {
       await screen.findByText(/No on-chain policy registered for this account/),
     ).toBeInTheDocument();
     expect(screen.queryByText(/Live limit unavailable/)).not.toBeInTheDocument();
+  });
+
+  // The third state: the helper answered, and what it said was "more than one
+  // limit". An empty "no policy registered" card here would tell a reviewer the
+  // account is unrestricted when it is the most restricted on screen.
+  it("shows neither a figure nor an empty state when the answer is ambiguous", async () => {
+    await renderCard(
+      payload({
+        spendingLimitState: null,
+        policyAmbiguous:
+          "This context rule carries more than one spending limit, and the helper refuses to pick one.",
+      }),
+    );
+
+    expect(await screen.findByText(/Live limit not shown/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/more than one spending limit, and the helper refuses/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/No on-chain policy registered/),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/Live limit unavailable/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/%/)).not.toBeInTheDocument();
   });
 });

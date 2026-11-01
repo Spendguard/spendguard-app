@@ -1,7 +1,11 @@
 export { SorobanClient, normalizeContractEvent } from "./soroban-client.js";
 export type { SorobanClientConfig, ContractEventFilter, GetEventsOptions } from "./soroban-client.js";
 
-export { PolicyReader, PolicyReaderError } from "./policy-reader.js";
+export {
+  PolicyReader,
+  PolicyReaderError,
+  isSpendingLimitAbsence,
+} from "./policy-reader.js";
 
 export {
   addressToScVal,
@@ -14,6 +18,7 @@ export {
   scValToU64,
   decodeSpendingLimitView,
   decodeContractError,
+  POLICY_VIEW_ERROR,
 } from "./xdr-helpers.js";
 export type { ContractErrorCode } from "./xdr-helpers.js";
 

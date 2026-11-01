@@ -124,19 +124,26 @@ export function decodeSpendingLimitView(scv: xdr.ScVal): SpendingLimitView {
 
 // ── Error decoding ────────────────────────────────────────────────────
 
+/**
+ * The helper's `PolicyViewError`, as it numbers the variants on the wire.
+ *
+ * Two readers share this map: `decodeContractError` for an error `ScVal`, and
+ * `PolicyReader` for the `Error(Contract, #N)` text a failed simulation
+ * returns. Keeping the numbers here means a new variant is one line here plus
+ * one decision in the caller — not a string match somewhere else.
+ */
+export const POLICY_VIEW_ERROR = {
+  NoSpendingLimitPolicyInstalled: 1,
+  AccountNotFound: 2,
+  UnsupportedContextType: 3,
+  MultipleSpendingLimitPolicies: 4,
+} as const;
+
 export type ContractErrorCode =
-  | "NoSpendingLimitPolicyInstalled"
-  | "AccountNotFound"
-  | "UnsupportedContextType"
+  | keyof typeof POLICY_VIEW_ERROR
   | "UnknownContractError";
 
-const ERROR_MAP: Record<number, ContractErrorCode> = {
-  1: "NoSpendingLimitPolicyInstalled",
-  2: "AccountNotFound",
-  3: "UnsupportedContextType",
-};
-
-/** Decode a contract error ScVal into a human-readable name. */
+/** Decode a contract error ScVal into the variant's name. */
 export function decodeContractError(scv: xdr.ScVal): ContractErrorCode {
   if (scv.switch() !== xdr.ScValType.scvError()) {
     return "UnknownContractError";
@@ -144,5 +151,8 @@ export function decodeContractError(scv: xdr.ScVal): ContractErrorCode {
   const scError = scv.value() as xdr.ScError;
   // contractCode() returns the numeric error code for contract errors
   const code = scError.contractCode();
-  return ERROR_MAP[code] ?? "UnknownContractError";
+  const variant = Object.entries(POLICY_VIEW_ERROR).find(
+    ([, value]) => value === code,
+  );
+  return variant ? (variant[0] as ContractErrorCode) : "UnknownContractError";
 }

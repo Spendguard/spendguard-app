@@ -16,6 +16,10 @@
  * read itself failed (RPC down, restore required, shape mismatch) — the two are
  * never collapsed into each other.
  *
+ * `policyAmbiguous` is a third state: the helper answered that it will not
+ * return a single number (`MultipleSpendingLimitPolicies`, or a variant this
+ * build does not know). Nothing is shown for the same reason nothing is guessed.
+ *
  * Also fetches the native XLM balance from the Horizon-compatible endpoint
  * baked into the stellar-sdk Server.
  *
@@ -28,6 +32,8 @@ import {
   SorobanClient,
   PolicyReader,
   PolicyReaderError,
+  isSpendingLimitAbsence,
+  POLICY_VIEW_ERROR,
   estimateWindowSeconds,
   estimateLedgerCloseTime,
 } from "@spendguard/sdk";
@@ -96,6 +102,12 @@ export async function GET(request: Request): Promise<NextResponse> {
     // an empty state for what is actually an outage or a decode mismatch.
     let policyReadError: string | null = null;
 
+    // `Error(Contract, #4)` is neither. The helper refused to choose between
+    // several limits, which is a statement about the account, not about the
+    // reader. Picking one silently would put a made-up number on a treasury
+    // dashboard, so ambiguity gets its own field and its own card state.
+    let policyAmbiguous: string | null = null;
+
     try {
       const state = await reader.getSpendingLimitState(address, ruleId);
       spendingLimitState = {
@@ -112,16 +124,27 @@ export async function GET(request: Request): Promise<NextResponse> {
       };
     } catch (err) {
       if (err instanceof PolicyReaderError && err.code === "CONTRACT_ERROR") {
-        // The helper answered with a `PolicyViewError`: no policy on this
-        // rule, the address is not a smart account carrying this rule, or the
-        // rule's context cannot carry a spending limit. All three are
-        // genuinely "nothing to show". A `HOST_ERROR` — the call never ran,
-        // e.g. `Error(Object, InvalidInput)` for a plain `G…` address — falls
-        // through to the failure branch instead.
-        console.info(
-          `No live spending limit for ${address} rule ${ruleId}:`,
-          err.message,
-        );
+        if (isSpendingLimitAbsence(err.contractErrorCode)) {
+          // The helper answered that there is nothing to show: no policy on
+          // this rule, the address is not a smart account carrying this rule,
+          // or the rule's context cannot carry a spending limit. A `HOST_ERROR`
+          // — the call never ran, e.g. `Error(Object, InvalidInput)` for a
+          // plain `G…` address — falls through to the failure branch instead.
+          console.info(
+            `No live spending limit for ${address} rule ${ruleId}:`,
+            err.message,
+          );
+        } else {
+          policyAmbiguous =
+            err.contractErrorCode ===
+            POLICY_VIEW_ERROR.MultipleSpendingLimitPolicies
+              ? "This context rule carries more than one spending limit, and the helper refuses to pick one. Showing a single utilisation would be a guess, so none is shown."
+              : `The helper answered with PolicyViewError #${err.contractErrorCode ?? "?"}, which this build does not recognise. Nothing is shown rather than something guessed.`;
+          console.warn(
+            `Ambiguous live spending limit for ${address} rule ${ruleId}:`,
+            err.message,
+          );
+        }
       } else {
         const reason = err instanceof Error ? err.message : String(err);
         console.error(`Live policy read failed for ${address} rule ${ruleId}:`, reason);
@@ -158,6 +181,7 @@ export async function GET(request: Request): Promise<NextResponse> {
       xlmBalance,
       spendingLimitState,
       policyReadError,
+      policyAmbiguous,
       fetchedAt: new Date().toISOString(),
     });
   } catch (err) {

@@ -1,6 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
 import { xdr, nativeToScVal, type rpc } from "@stellar/stellar-sdk";
-import { PolicyReader, PolicyReaderError } from "../src/policy-reader.js";
+import {
+  PolicyReader,
+  PolicyReaderError,
+  isSpendingLimitAbsence,
+} from "../src/policy-reader.js";
+import { POLICY_VIEW_ERROR } from "../src/xdr-helpers.js";
 import type { SorobanClient } from "../src/soroban-client.js";
 
 const ACCOUNT = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
@@ -91,6 +96,60 @@ describe("PolicyReader.getSpendingLimitState", () => {
     await expect(reader.getSpendingLimitState(CONTRACT, 0)).rejects.toMatchObject({
       code: "CONTRACT_ERROR",
     });
+  });
+
+  // The variant number is what separates "nothing to show" from "more than one
+  // thing to show". `code` alone cannot tell them apart, and a caller that
+  // guesses from the message text is one new variant away from rendering an
+  // account with two limits as having none.
+  it("carries the PolicyViewError variant on a contract error", async () => {
+    const simulate = vi.fn().mockResolvedValue({
+      error:
+        "HostError: Error(Contract, #4)\n\nEvent log (newest first):\n   0: [Diagnostic Event] contract:CCAM4NRAU..., topics:[error, Error(Contract, #4)], data:\"escalating Ok(ScErrorType::Contract) frame-exit to Err\"\n",
+    } as unknown as rpc.Api.SimulateTransactionResponse);
+    const reader = new PolicyReader(mockClient(simulate), CONTRACT, SOURCE);
+
+    const err = await reader
+      .getSpendingLimitState(CONTRACT, 1)
+      .then(() => null)
+      .catch((e: unknown) => e as PolicyReaderError);
+
+    expect(err?.code).toBe("CONTRACT_ERROR");
+    expect(err?.contractErrorCode).toBe(
+      POLICY_VIEW_ERROR.MultipleSpendingLimitPolicies,
+    );
+  });
+
+  // A variant from a future helper is reported as what it is — an unfamiliar
+  // number — rather than being folded into the absence cases.
+  it("keeps an unrecognised variant visible instead of defaulting to absence", async () => {
+    const simulate = vi.fn().mockResolvedValue({
+      error: "HostError: Error(Contract, #7)",
+    } as unknown as rpc.Api.SimulateTransactionResponse);
+    const reader = new PolicyReader(mockClient(simulate), CONTRACT, SOURCE);
+
+    const err = await reader
+      .getSpendingLimitState(CONTRACT, 1)
+      .then(() => null)
+      .catch((e: unknown) => e as PolicyReaderError);
+
+    expect(err?.contractErrorCode).toBe(7);
+    expect(isSpendingLimitAbsence(err?.contractErrorCode ?? null)).toBe(false);
+  });
+
+  it("leaves the variant null when the call never reached the contract", async () => {
+    const simulate = vi.fn().mockResolvedValue({
+      error: "HostError: Error(Object, InvalidInput)",
+    } as unknown as rpc.Api.SimulateTransactionResponse);
+    const reader = new PolicyReader(mockClient(simulate), CONTRACT, SOURCE);
+
+    const err = await reader
+      .getSpendingLimitState(ACCOUNT, 1)
+      .then(() => null)
+      .catch((e: unknown) => e as PolicyReaderError);
+
+    expect(err?.code).toBe("HOST_ERROR");
+    expect(err?.contractErrorCode).toBeNull();
   });
 
   it("maps a non-contract host error to PolicyReaderError(HOST_ERROR)", async () => {
@@ -277,5 +336,21 @@ describe("PolicyReader.getVersion", () => {
     const reader = new PolicyReader(mockClient(simulate), CONTRACT, SOURCE);
 
     await expect(reader.getVersion()).rejects.toMatchObject({ code: "RPC_FAILURE" });
+  });
+});
+
+// The line a caller must not draw by itself: three of the helper's variants
+// mean an empty account, and the rest do not.
+describe("isSpendingLimitAbsence", () => {
+  it("reads the three 'nothing to show' variants as absence", () => {
+    expect(isSpendingLimitAbsence(POLICY_VIEW_ERROR.NoSpendingLimitPolicyInstalled)).toBe(true);
+    expect(isSpendingLimitAbsence(POLICY_VIEW_ERROR.AccountNotFound)).toBe(true);
+    expect(isSpendingLimitAbsence(POLICY_VIEW_ERROR.UnsupportedContextType)).toBe(true);
+  });
+
+  it("refuses to call a second limit, an unknown variant, or no variant absence", () => {
+    expect(isSpendingLimitAbsence(POLICY_VIEW_ERROR.MultipleSpendingLimitPolicies)).toBe(false);
+    expect(isSpendingLimitAbsence(99)).toBe(false);
+    expect(isSpendingLimitAbsence(null)).toBe(false);
   });
 });

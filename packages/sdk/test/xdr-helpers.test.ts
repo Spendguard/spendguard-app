@@ -175,6 +175,11 @@ describe("decodeContractError", () => {
     expect(decodeContractError(contractError(1))).toBe("NoSpendingLimitPolicyInstalled");
     expect(decodeContractError(contractError(2))).toBe("AccountNotFound");
     expect(decodeContractError(contractError(3))).toBe("UnsupportedContextType");
+    // Helper v2 (#5): the rule has more than one spending limit. The numbers
+    // are pinned literally because they are the wire format — renumbering
+    // `POLICY_VIEW_ERROR` to match a renamed variant would silently swap the
+    // absence and ambiguity cases.
+    expect(decodeContractError(contractError(4))).toBe("MultipleSpendingLimitPolicies");
   });
 
   it("returns UnknownContractError for unrecognised codes", () => {
