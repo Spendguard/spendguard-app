@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { xdr, nativeToScVal, Address } from "@stellar/stellar-sdk";
+import { xdr, nativeToScVal } from "@stellar/stellar-sdk";
 import {
   addressToScVal,
   scValToAddress,

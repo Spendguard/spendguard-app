@@ -15,7 +15,7 @@
     "build:web": "npm -w apps/web run build",
     "build": "npm run build:sdk && npm run build:indexer && npm run build:web",
     "pretypecheck": "npm run build:sdk",
-    "typecheck": "tsc --noEmit --project packages/sdk/tsconfig.json && tsc --noEmit --project indexer/tsconfig.json && tsc --noEmit --project apps/web/tsconfig.json",
+    "typecheck": "tsc --noEmit --project packages/sdk/tsconfig.json && tsc -p packages/sdk/tsconfig.test.json && tsc --noEmit --project indexer/tsconfig.json && tsc --noEmit --project apps/web/tsconfig.json",
     "lint": "eslint 'packages/*/src/**/*.ts' 'indexer/src/**/*.ts' 'apps/web/**/*.{ts,tsx}'",
     "test": "npm -w packages/sdk run test && npm -w indexer run test && npm -w apps/web run test"
   },
