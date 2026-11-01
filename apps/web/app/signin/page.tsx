@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { useAccount } from "@/context/AccountContext";
+import { DEMO_IDENTITIES } from "@/lib/auth/demo-identities";
 
 /**
  * Sign-in screen.
@@ -12,14 +13,6 @@ import { useAccount } from "@/context/AccountContext";
  * them. Real deployments put an IdP in front; /api/auth/session returns 501
  * when DEMO_AUTH is off.
  */
-
-const DEMO_IDENTITIES: Array<{ email: string; label: string }> = [
-  { email: "owner@spendguard.io", label: "Alice Owner — full control" },
-  { email: "admin@spendguard.io", label: "Bob Admin — members and policies" },
-  { email: "finance@spendguard.io", label: "Carol Finance — budgets and proposals" },
-  { email: "approver@spendguard.io", label: "Dan Approver — votes only" },
-  { email: "viewer@spendguard.io", label: "Eve Viewer — read-only" },
-];
 
 export default function SignInPage() {
   const { signIn } = useAccount();
