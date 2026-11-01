@@ -8,15 +8,18 @@ import {
   verifySessionToken,
 } from "@/lib/auth/session";
 import { AccountService } from "@/lib/services/account-service";
+import { isDemoIdentity } from "@/lib/auth/demo-identities";
 
 /**
  * Demo identity endpoints.
  *
  * POST /api/auth/session is a demo affordance, not authentication: it trades an
  * email address for a signed session with no credential check. It only exists
- * when DEMO_AUTH=true (the seeded, no-database experience). A real deployment
- * puts an identity provider in front and leaves this route returning 501, so
- * "who are you" is answered by the IdP and "what may you do" is answered here.
+ * when DEMO_AUTH=true, which covers the seeded no-database experience and the
+ * first account of a database-backed deployment (see the bootstrap note in
+ * POST). A real deployment puts an identity provider in front and leaves this
+ * route returning 501, so "who are you" is answered by the IdP and "what may
+ * you do" is answered here.
  *
  * GET    /api/auth/session — current identity, plus this user's role per account
  * POST   /api/auth/session — demo sign-in { email }
@@ -81,10 +84,20 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   const identity = await identityPayload(email.trim().toLowerCase());
   if (identity.memberships.length === 0) {
-    return NextResponse.json(
-      { error: `"${email}" is not a member of any treasury account` },
-      { status: 403 }
-    );
+    // One case where refusing is self-defeating: a deployment pointed at an
+    // empty database. Creating the first treasury account needs a session, and
+    // a session needs a membership that only account creation writes — so the
+    // loop can never be entered. Bounded three ways: this route is demo-only
+    // (501 above), the deployment has no accounts at all, and the email has to
+    // be one the sign-in screen itself offers. The session that results can do
+    // nothing but create that first account, which makes its caller its Owner.
+    const firstAccountEver = (await AccountService.listAccounts()).length === 0;
+    if (!firstAccountEver || !isDemoIdentity(email)) {
+      return NextResponse.json(
+        { error: `"${email}" is not a member of any treasury account` },
+        { status: 403 }
+      );
+    }
   }
 
   const token = createSessionToken(identity.email);
