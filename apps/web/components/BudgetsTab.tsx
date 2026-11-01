@@ -2,7 +2,6 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { useAccount } from "@/context/AccountContext";
-import { hasPermission, AccountRole } from "@spendguard/sdk";
 
 interface BudgetItem {
   id: string;
@@ -16,7 +15,7 @@ interface BudgetItem {
 }
 
 export function BudgetsTab({ accountId }: { accountId: string }) {
-  const { userRole } = useAccount();
+  const { can } = useAccount();
   const [budgets, setBudgets] = useState<BudgetItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -28,7 +27,7 @@ export function BudgetsTab({ accountId }: { accountId: string }) {
   const [period, setPeriod] = useState<"Monthly" | "Quarterly" | "Annual">("Monthly");
   const [submitting, setSubmitting] = useState(false);
 
-  const canManage = hasPermission(userRole as AccountRole, "budgets:manage");
+  const canManage = can("budgets:manage");
 
   const loadBudgets = useCallback(async () => {
     try {
@@ -64,8 +63,6 @@ export function BudgetsTab({ accountId }: { accountId: string }) {
           category,
           allocatedAmount: allocatedStroops,
           period,
-          actorRole: userRole,
-          actorEmail: "user@spendguard.io",
         }),
       });
 

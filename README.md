@@ -135,6 +135,14 @@ spendguard-app/
 | `multisig:approve` | ✅ | ✅ | ❌ | ✅ | ❌ |
 | `data:view` | ✅ | ✅ | ✅ | ✅ | ✅ |
 
+Enforcement is **server-side**. Every `/api/*` handler resolves the actor from a
+signed, `HttpOnly` session cookie and looks the role up in that account's
+membership on each request — the client never supplies a role. A request that
+claims `"actorRole": "Owner"` while the session belongs to a Viewer is rejected
+with `Role "Viewer" does not have permission to manage members`, and the
+membership-scoped queries mean a treasury you do not belong to is absent from
+your listings rather than filtered out of them.
+
 ---
 
 ## Security posture
@@ -143,6 +151,7 @@ SpendGuard is built on a simple principle: **the least powerful tool that solves
 
 - 🔑 No private keys, no signing, no transaction submission — anywhere in this repo
 - 👀 Reads only public on-chain data
+- 🎭 Sessions carry identity only; roles are resolved from membership per request, so a stolen-or-forged client payload cannot escalate
 - 📦 Attack surface limited to event-decoding correctness, alert delivery, and API access control
 - 📖 See [SECURITY.md](./SECURITY.md) for the full policy and responsible-disclosure process
 
@@ -181,6 +190,16 @@ SIMULATION_SOURCE_ACCOUNT_SECRET="<account secret — only needed by send:transf
 
 NEAR_MISS_THRESHOLD_PCT=90
 POLL_INTERVAL_MS=10000
+
+# Session signing — any value of >=16 chars, e.g. `openssl rand -hex 32`.
+# Left unset, the web app falls back to a per-process secret and sessions stop
+# validating on every restart.
+SESSION_SECRET="<random secret>"
+
+# Enables the seeded demo sign-in at /signin (identity only, no credentials).
+# Leave this unset for anything real and /api/auth/session returns 501 until an
+# identity provider is wired in.
+DEMO_AUTH="true"
 ```
 
 ```bash
@@ -247,13 +266,16 @@ CI (GitHub Actions) runs **install, typecheck, lint, and tests** on every push a
 
 ## API surface
 
-- `GET/POST /api/accounts` — list (status/type/search filters) / create treasury accounts
+Every route below requires a session cookie; account-scoped routes additionally require membership on that account.
+
+- `GET/POST/DELETE /api/auth/session` — read identity / demo sign-in (`501` unless `DEMO_AUTH=true`) / sign out
+- `GET/POST /api/accounts` — list **the treasuries you belong to** (status/type/search filters) / create
 - `GET /api/accounts?address=G…&events=true` — **live ingested settlement events** (SEP-41 `transfer` / `spending_limit_enforced`) for an address, newest first — the data behind the dashboard's Spend History chart and Transactions tab
 - `GET /api/accounts?address=G…&alerts=true` — breach/near-miss alerts for an account
 - `GET /api/stellar/account?address=G…&ruleId=…` — live on-chain account state (sequence, XLM balance via Horizon REST, RPC reachability)
-- `GET/PATCH /api/accounts/[id]` — account detail & update
+- `GET/PATCH/DELETE /api/accounts/[id]` — account detail, update, archive/delete
 - `GET/POST /api/accounts/[id]/members` · `/policies` · `/budgets` · `/multisig` · `/settings` · `/audit-logs`
-- `POST /api/webhooks` — alert delivery endpoint
+- `GET/POST/DELETE /api/webhooks` — alert delivery endpoints; requires Owner or Admin on any treasury, since these decide where alert payloads and a signing secret are sent
 
 ---
 
@@ -262,6 +284,7 @@ CI (GitHub Actions) runs **install, typecheck, lint, and tests** on every push a
 1. **Live testnet flow verified, but not yet a CI golden-fixture test.** Real SEP-41 transfers have been sent, ingested, and rendered end-to-end (transfer → indexer → Postgres → dashboard/API) against this repo's live testnet configuration. That verification is currently manual — the automated suite still relies on encode/decode round-trips plus one captured real on-chain value.
 2. **Only `spending_limit`-policy accounts are supported** so far (`simple_threshold`, `weighted_threshold` are next).
 3. **`spending_limit` is transfer-context only** — an upstream OpenZeppelin constraint, not a SpendGuard one.
+4. **The demo sign-in is identification, not authentication.** `/signin` hands out a signed session for a named email with no credential check, and is gated behind `DEMO_AUTH=true` so it cannot be mistaken for production auth. Authorization is real and server-side; the "who are you" step still needs an IdP.
 
 SpendGuard is intentionally scoped to prove policy-aware, real on-chain observability first — not premature production hardening.
 
@@ -272,7 +295,7 @@ SpendGuard is intentionally scoped to prove policy-aware, real on-chain observab
 - 🧪 Turn the verified live testnet flow into an automated golden-fixture test in CI
 - 🧩 Support additional OZ policy types (`simple_threshold`, `weighted_threshold`)
 - 🔔 PagerDuty / Slack alert sinks alongside webhooks
-- 🧑‍💻 Real auth (OAuth / wallet sign-in) replacing the role switcher demo
+- 🔐 Wire a real identity provider (OAuth / wallet sign-in) behind the session layer that now enforces authorization
 
 ---
 

@@ -1,13 +1,25 @@
 import { NextResponse } from "next/server";
 import { AccountService } from "@/lib/services/account-service";
+import { resolveActor } from "@/lib/auth/session";
 import type { AccountRole } from "@spendguard/sdk";
+
+/**
+ * Member management for one treasury account.
+ *
+ * The acting role comes from the verified session, not from the request body.
+ */
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
+  const { id } = await params;
+  const auth = await resolveActor(request, id);
+  if ("failure" in auth) {
+    return NextResponse.json({ error: auth.failure.error }, { status: auth.failure.status });
+  }
+
   try {
-    const { id } = await params;
     const members = await AccountService.getMembers(id);
     return NextResponse.json(members);
   } catch (err) {
@@ -22,11 +34,14 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
+  const { id } = await params;
+  const auth = await resolveActor(request, id);
+  if ("failure" in auth) {
+    return NextResponse.json({ error: auth.failure.error }, { status: auth.failure.status });
+  }
+
   try {
-    const { id } = await params;
     const body = await request.json();
-    const actorRole = (body.actorRole as AccountRole) || "Admin";
-    const actorEmail = (body.actorEmail as string) || "admin@spendguard.io";
 
     if (!body.email || !body.name || !body.role) {
       return NextResponse.json(
@@ -38,8 +53,8 @@ export async function POST(
     const member = await AccountService.addMember(
       id,
       { email: body.email, name: body.name, role: body.role as AccountRole },
-      actorRole,
-      actorEmail
+      auth.actor.role,
+      auth.actor.email
     );
 
     return NextResponse.json(member, { status: 201 });
@@ -55,11 +70,14 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
+  const { id } = await params;
+  const auth = await resolveActor(request, id);
+  if ("failure" in auth) {
+    return NextResponse.json({ error: auth.failure.error }, { status: auth.failure.status });
+  }
+
   try {
-    const { id } = await params;
     const body = await request.json();
-    const actorRole = (body.actorRole as AccountRole) || "Admin";
-    const actorEmail = (body.actorEmail as string) || "admin@spendguard.io";
 
     if (!body.memberId || !body.newRole) {
       return NextResponse.json(
@@ -72,8 +90,8 @@ export async function PATCH(
       id,
       body.memberId,
       body.newRole as AccountRole,
-      actorRole,
-      actorEmail
+      auth.actor.role,
+      auth.actor.email
     );
 
     return NextResponse.json(updated);
@@ -89,18 +107,21 @@ export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
+  const { id } = await params;
+  const auth = await resolveActor(request, id);
+  if ("failure" in auth) {
+    return NextResponse.json({ error: auth.failure.error }, { status: auth.failure.status });
+  }
+
   try {
-    const { id } = await params;
     const { searchParams } = new URL(request.url);
     const memberId = searchParams.get("memberId");
-    const actorRole = (searchParams.get("actorRole") as AccountRole) || "Admin";
-    const actorEmail = searchParams.get("actorEmail") || "admin@spendguard.io";
 
     if (!memberId) {
       return NextResponse.json({ error: "Missing memberId parameter" }, { status: 400 });
     }
 
-    await AccountService.removeMember(id, memberId, actorRole, actorEmail);
+    await AccountService.removeMember(id, memberId, auth.actor.role, auth.actor.email);
     return NextResponse.json({ success: true });
   } catch (err) {
     return NextResponse.json(

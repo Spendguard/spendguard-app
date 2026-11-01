@@ -4,11 +4,14 @@
  * GET    /api/accounts/[id] — fetch details for account
  * PATCH  /api/accounts/[id] — update account
  * DELETE /api/accounts/[id] — archive or delete account
+ *
+ * The actor is always the signed-in session, never a field in the request: a
+ * caller asserting "actorRole": "Owner" used to be enough to pass every check.
  */
 
 import { NextResponse } from "next/server";
 import { AccountService } from "@/lib/services/account-service";
-import type { AccountRole } from "@spendguard/sdk";
+import { resolveActor } from "@/lib/auth/session";
 
 export async function GET(
   request: Request,
@@ -16,6 +19,14 @@ export async function GET(
 ): Promise<NextResponse> {
   try {
     const { id } = await params;
+
+    // Members and settings (webhook URLs, thresholds) are sensitive, so reads
+    // require membership too rather than running unauthenticated.
+    const auth = await resolveActor(request, id);
+    if ("failure" in auth) {
+      return NextResponse.json({ error: auth.failure.error }, { status: auth.failure.status });
+    }
+
     const account = await AccountService.getAccountById(id);
     if (!account) {
       return NextResponse.json({ error: "Account not found" }, { status: 404 });
@@ -26,7 +37,7 @@ export async function GET(
       AccountService.getSettings(account.id),
     ]);
 
-    return NextResponse.json({ ...account, members, settings });
+    return NextResponse.json({ ...account, members, settings, actorRole: auth.actor.role });
   } catch (err) {
     console.error("GET /api/accounts/[id] error:", err);
     return NextResponse.json(
@@ -40,11 +51,14 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
+  const { id } = await params;
+  const auth = await resolveActor(request, id);
+  if ("failure" in auth) {
+    return NextResponse.json({ error: auth.failure.error }, { status: auth.failure.status });
+  }
+
   try {
-    const { id } = await params;
     const body = await request.json();
-    const actorRole = (body.actorRole as AccountRole) || "Admin";
-    const actorEmail = (body.actorEmail as string) || "admin@spendguard.io";
 
     const updated = await AccountService.updateAccount(
       id,
@@ -55,8 +69,8 @@ export async function PATCH(
         status: body.status,
         contextRuleId: body.contextRuleId ? Number(body.contextRuleId) : undefined,
       },
-      actorRole,
-      actorEmail
+      auth.actor.role,
+      auth.actor.email
     );
 
     return NextResponse.json(updated);
@@ -73,14 +87,17 @@ export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
+  const { id } = await params;
+  const auth = await resolveActor(request, id);
+  if ("failure" in auth) {
+    return NextResponse.json({ error: auth.failure.error }, { status: auth.failure.status });
+  }
+
   try {
-    const { id } = await params;
     const { searchParams } = new URL(request.url);
     const action = searchParams.get("action") === "delete" ? "delete" : "archive";
-    const actorRole = (searchParams.get("actorRole") as AccountRole) || "Owner";
-    const actorEmail = searchParams.get("actorEmail") || "owner@spendguard.io";
 
-    await AccountService.archiveOrDeleteAccount(id, action, actorRole, actorEmail);
+    await AccountService.archiveOrDeleteAccount(id, action, auth.actor.role, auth.actor.email);
     return NextResponse.json({ success: true, action });
   } catch (err) {
     console.error("DELETE /api/accounts/[id] error:", err);

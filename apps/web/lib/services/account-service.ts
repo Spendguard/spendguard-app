@@ -255,8 +255,81 @@ function getDb(): postgres.Sql | null {
 
 // ── Account Service ───────────────────────────────────────────────────
 
+type AccountFilters = { status?: AccountStatus; type?: AccountType; search?: string };
+
+function filterAccounts(list: TreasuryAccount[], filters?: AccountFilters): TreasuryAccount[] {
+  let result = list;
+  if (filters?.status) {
+    result = result.filter((a) => a.status === filters.status);
+  }
+  if (filters?.type) {
+    result = result.filter((a) => a.type === filters.type);
+  }
+  if (filters?.search) {
+    const q = filters.search.toLowerCase();
+    result = result.filter(
+      (a) =>
+        a.name.toLowerCase().includes(q) ||
+        a.description.toLowerCase().includes(q) ||
+        a.address.toLowerCase().includes(q)
+    );
+  }
+  return result.sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+}
+
 export class AccountService {
   // ── Account CRUD ────────────────────────────────────────────────────
+
+  static async listAccountsForMember(
+    email: string,
+    filters?: { status?: AccountStatus; type?: AccountType; search?: string }
+  ): Promise<TreasuryAccount[]> {
+    const db = getDb();
+    if (db) {
+      try {
+        const rows = await db`
+          SELECT ta.id, ta.name, ta.description, ta.address, ta.type, ta.status,
+                 ta.context_rule_id, ta.created_at, ta.updated_at
+          FROM treasury_accounts ta
+          JOIN account_members am ON am.account_id = ta.id
+          WHERE lower(am.email) = lower(${email})
+          ORDER BY ta.created_at DESC
+        `;
+        await db.end({ timeout: 2 });
+        return filterAccounts(
+          rows.map((r) => ({
+            id: r.id as string,
+            name: r.name as string,
+            description: (r.description as string) || "",
+            address: r.address as string,
+            type: r.type as AccountType,
+            status: r.status as AccountStatus,
+            contextRuleId: r.context_rule_id as number,
+            createdAt: (r.created_at as Date).toISOString(),
+            updatedAt: (r.updated_at as Date).toISOString(),
+          })),
+          filters
+        );
+      } catch (err) {
+        console.warn("DB membership-scoped account query failed, using memory store:", err);
+      }
+    }
+
+    // Membership is the boundary: a treasury you do not belong to is not
+    // filtered out of the response, it is absent from it.
+    const memberships = new Set<string>();
+    for (const [accountId, members] of memoryStore.members.entries()) {
+      if (members.some((m) => m.email.toLowerCase() === email.toLowerCase())) {
+        memberships.add(accountId);
+      }
+    }
+    return filterAccounts(
+      Array.from(memoryStore.accounts.values()).filter((a) => memberships.has(a.id)),
+      filters
+    );
+  }
 
   static async listAccounts(filters?: {
     status?: AccountStatus;
@@ -266,64 +339,32 @@ export class AccountService {
     const db = getDb();
     if (db) {
       try {
-        // Apply filters if provided
         const accounts = await db`
           SELECT id, name, description, address, type, status, context_rule_id, created_at, updated_at
           FROM treasury_accounts
           ORDER BY created_at DESC
         `;
         await db.end({ timeout: 2 });
-        let result: TreasuryAccount[] = accounts.map((r) => ({
-          id: r.id as string,
-          name: r.name as string,
-          description: (r.description as string) || "",
-          address: r.address as string,
-          type: r.type as AccountType,
-          status: r.status as AccountStatus,
-          contextRuleId: r.context_rule_id as number,
-          createdAt: (r.created_at as Date).toISOString(),
-          updatedAt: (r.updated_at as Date).toISOString(),
-        }));
-
-        if (filters?.status) {
-          result = result.filter((a) => a.status === filters.status);
-        }
-        if (filters?.type) {
-          result = result.filter((a) => a.type === filters.type);
-        }
-        if (filters?.search) {
-          const q = filters.search.toLowerCase();
-          result = result.filter(
-            (a) =>
-              a.name.toLowerCase().includes(q) ||
-              a.description.toLowerCase().includes(q) ||
-              a.address.toLowerCase().includes(q)
-          );
-        }
-        return result;
+        return filterAccounts(
+          accounts.map((r) => ({
+            id: r.id as string,
+            name: r.name as string,
+            description: (r.description as string) || "",
+            address: r.address as string,
+            type: r.type as AccountType,
+            status: r.status as AccountStatus,
+            contextRuleId: r.context_rule_id as number,
+            createdAt: (r.created_at as Date).toISOString(),
+            updatedAt: (r.updated_at as Date).toISOString(),
+          })),
+          filters
+        );
       } catch (err) {
         console.warn("DB query failed, using memory store fallback:", err);
       }
     }
 
-    // In-memory fallback
-    let list = Array.from(memoryStore.accounts.values());
-    if (filters?.status) {
-      list = list.filter((a) => a.status === filters.status);
-    }
-    if (filters?.type) {
-      list = list.filter((a) => a.type === filters.type);
-    }
-    if (filters?.search) {
-      const q = filters.search.toLowerCase();
-      list = list.filter(
-        (a) =>
-          a.name.toLowerCase().includes(q) ||
-          a.description.toLowerCase().includes(q) ||
-          a.address.toLowerCase().includes(q)
-      );
-    }
-    return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return filterAccounts(Array.from(memoryStore.accounts.values()), filters);
   }
 
   static async getAccountById(id: string): Promise<TreasuryAccount | null> {

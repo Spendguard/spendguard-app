@@ -4,11 +4,11 @@ import React, { useEffect, useState, useCallback, use } from "react";
 import Link from "next/link";
 import { useAccount } from "@/context/AccountContext";
 import { RoleBadge } from "@/components/RoleBadge";
-import { hasPermission, AccountRole, AccountMember } from "@spendguard/sdk";
+import { AccountRole, AccountMember } from "@spendguard/sdk";
 
 export default function MembersPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const { userRole } = useAccount();
+  const { userRole, can } = useAccount();
 
   const [members, setMembers] = useState<AccountMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -21,7 +21,7 @@ export default function MembersPage({ params }: { params: Promise<{ id: string }
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canManage = hasPermission(userRole as AccountRole, "members:manage");
+  const canManage = can("members:manage");
 
   const loadMembers = useCallback(async () => {
     try {
@@ -56,8 +56,6 @@ export default function MembersPage({ params }: { params: Promise<{ id: string }
           name,
           email,
           role,
-          actorRole: userRole,
-          actorEmail: "user@spendguard.io",
         }),
       });
 
@@ -85,7 +83,6 @@ export default function MembersPage({ params }: { params: Promise<{ id: string }
         body: JSON.stringify({
           memberId,
           newRole,
-          actorRole: userRole,
         }),
       });
       if (res.ok) {
@@ -102,7 +99,7 @@ export default function MembersPage({ params }: { params: Promise<{ id: string }
   const handleRemoveMember = async (memberId: string) => {
     if (!confirm("Are you sure you want to remove this member from the treasury account?")) return;
     try {
-      const res = await fetch(`/api/accounts/${id}/members?memberId=${memberId}&actorRole=${userRole}`, {
+      const res = await fetch(`/api/accounts/${id}/members?memberId=${memberId}`, {
         method: "DELETE",
       });
       if (res.ok) {
@@ -151,7 +148,8 @@ export default function MembersPage({ params }: { params: Promise<{ id: string }
 
       {!canManage && (
         <div className="rounded-xl border border-amber-800/60 bg-amber-950/40 p-4 text-xs font-medium text-amber-300">
-          Note: Your current role ({userRole}) has view-only permissions for members. Switch to Owner or Admin role in the top header bar to add or edit member roles.
+          Note: Your session holds the role &quot;{userRole}&quot; on this treasury, which is
+          view-only for members. An Owner or Admin must change your role for these controls to open up.
         </div>
       )}
 

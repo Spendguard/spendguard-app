@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { AccountService } from "@/lib/services/account-service";
-import type { AccountRole } from "@spendguard/sdk";
+import { resolveActor } from "@/lib/auth/session";
 
 export async function GET(
   request: Request,
@@ -8,6 +8,11 @@ export async function GET(
 ): Promise<NextResponse> {
   try {
     const { id } = await params;
+    const auth = await resolveActor(request, id);
+    if ("failure" in auth) {
+      return NextResponse.json({ error: auth.failure.error }, { status: auth.failure.status });
+    }
+
     const settings = await AccountService.getSettings(id);
     return NextResponse.json(settings);
   } catch (err) {
@@ -24,9 +29,12 @@ export async function PUT(
 ): Promise<NextResponse> {
   try {
     const { id } = await params;
+    const auth = await resolveActor(request, id);
+    if ("failure" in auth) {
+      return NextResponse.json({ error: auth.failure.error }, { status: auth.failure.status });
+    }
+
     const body = await request.json();
-    const actorRole = (body.actorRole as AccountRole) || "Admin";
-    const actorEmail = (body.actorEmail as string) || "admin@spendguard.io";
 
     const updated = await AccountService.updateSettings(
       id,
@@ -37,8 +45,8 @@ export async function PUT(
         notificationEmail: body.notificationEmail ?? null,
         autoLockOnBreach: body.autoLockOnBreach !== undefined ? Boolean(body.autoLockOnBreach) : undefined,
       },
-      actorRole,
-      actorEmail
+      auth.actor.role,
+      auth.actor.email
     );
 
     return NextResponse.json(updated);

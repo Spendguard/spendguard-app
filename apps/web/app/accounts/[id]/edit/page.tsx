@@ -4,12 +4,12 @@ import React, { useEffect, useState, use } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAccount } from "@/context/AccountContext";
-import { hasPermission, AccountRole, AccountType, AccountStatus } from "@spendguard/sdk";
+import { AccountType, AccountStatus } from "@spendguard/sdk";
 
 export default function EditAccountPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
-  const { refreshAccounts, userRole } = useAccount();
+  const { refreshAccounts, userRole, can } = useAccount();
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -21,7 +21,7 @@ export default function EditAccountPage({ params }: { params: Promise<{ id: stri
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canEdit = hasPermission(userRole as AccountRole, "account:edit");
+  const canEdit = can("account:edit");
 
   useEffect(() => {
     async function loadAccount() {
@@ -66,8 +66,6 @@ export default function EditAccountPage({ params }: { params: Promise<{ id: stri
           description: description.trim(),
           type,
           status,
-          actorRole: userRole,
-          actorEmail: "user@spendguard.io",
         }),
       });
 
@@ -112,7 +110,8 @@ export default function EditAccountPage({ params }: { params: Promise<{ id: stri
 
         {!canEdit && (
           <div className="mt-4 rounded-xl border border-amber-800/60 bg-amber-950/40 p-4 text-xs font-medium text-amber-300">
-            Warning: Your current active role ({userRole}) does not have permission to modify account settings. Switch to Owner or Admin to enable edits.
+            Warning: Your session holds the role &quot;{userRole}&quot; on this treasury, which cannot
+            modify account settings. An Owner or Admin must raise your role from the Members page.
           </div>
         )}
 
