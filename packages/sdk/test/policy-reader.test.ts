@@ -105,6 +105,21 @@ describe("PolicyReader.getSpendingLimitState", () => {
     });
   });
 
+  // The diagnostic log lists every nested frame, so a call that dies at the
+  // host level can still mention a contract error several lines down. Only the
+  // headline is the error that was actually returned.
+  it("ignores contract errors in the diagnostic log of a host failure", async () => {
+    const simulate = vi.fn().mockResolvedValue({
+      error:
+        "HostError: Error(WasmVM, Trap)\n\nEvent log (newest first):\n   0: [Diagnostic Event] contract:CCAM4NRAU..., topics:[error, Error(Contract, #1)], data:\"escalating error to VM trap from failed host function call\"\n",
+    } as unknown as rpc.Api.SimulateTransactionResponse);
+    const reader = new PolicyReader(mockClient(simulate), CONTRACT, SOURCE);
+
+    await expect(reader.getSpendingLimitState(CONTRACT, 0)).rejects.toMatchObject({
+      code: "HOST_ERROR",
+    });
+  });
+
   it("quotes only the headline of a host error, not the diagnostic log", async () => {
     const simulate = vi.fn().mockResolvedValue({
       error: "HostError: Error(WasmVM, Runtime)\n   0: long diagnostic line\n   1: another",
