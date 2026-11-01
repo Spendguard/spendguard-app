@@ -24,6 +24,7 @@ export type Membership = {
 export type Session = {
   email: string;
   memberships: Membership[];
+  demoMode?: boolean;
 };
 
 interface AccountContextType {
@@ -35,6 +36,8 @@ interface AccountContextType {
   loading: boolean;
   session: Session | null;
   userRole: AccountRole | null;
+  /** True when this deployment signs people in from an email alone. */
+  demoMode: boolean;
   /** False when the user holds no role on the active account. */
   can: (permission: Permission) => boolean;
   signIn: (email: string) => Promise<void>;
@@ -50,6 +53,7 @@ const AccountContext = createContext<AccountContextType>({
   loading: true,
   session: null,
   userRole: null,
+  demoMode: false,
   can: () => false,
   signIn: async () => {},
   signOut: async () => {},
@@ -63,6 +67,7 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
   const [accounts, setAccounts] = useState<TreasuryAccount[]>([]);
   const [activeAccountId, setActiveAccountIdState] = useState<string | null>(null);
   const [session, setSession] = useState<Session | null>(null);
+  const [demoMode, setDemoMode] = useState(false);
   const [loading, setLoading] = useState<boolean>(true);
 
   const fetchState = useCallback(async () => {
@@ -74,14 +79,18 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
         fetch("/api/accounts"),
       ]);
 
+      const sessionBody = (await sessionRes.json().catch(() => ({}))) as Session & {
+        authenticated?: boolean;
+      };
+      setDemoMode(sessionBody.demoMode === true);
+
       if (sessionRes.status === 401) {
         setSession(null);
         setAccounts([]);
         return;
       }
 
-      const sessionData = (await sessionRes.json()) as Session;
-      setSession(sessionData);
+      setSession(sessionBody);
 
       if (accountsRes.ok) {
         const data = (await accountsRes.json()) as TreasuryAccount[];
@@ -171,6 +180,7 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
         loading,
         session,
         userRole,
+        demoMode,
         can,
         signIn,
         signOut,

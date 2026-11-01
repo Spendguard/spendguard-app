@@ -9,7 +9,7 @@ import { ThemeToggle } from "./ThemeToggle";
 
 export function Header() {
   const pathname = usePathname();
-  const { activeAccount, userRole, session, signOut } = useAccount();
+  const { activeAccount, userRole, session, demoMode, signOut } = useAccount();
 
   const navItems = [
     { name: "Overview", href: activeAccount ? `/accounts/${activeAccount.id}` : "/" },
@@ -88,6 +88,19 @@ export function Header() {
                 Sign out
               </button>
             </div>
+          )}
+
+          {/* Honest labelling of a demo deployment. The flag comes from the
+              server's session answer, never from client state, so it cannot be
+              turned off by whoever is looking at the page. */}
+          {demoMode && (
+            <span
+              role="status"
+              title="This deployment signs people in from an email address alone. Authorization is still enforced per request."
+              className="inline-flex items-center rounded-lg border border-amber-700/60 bg-amber-950/40 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-amber-300"
+            >
+              Demo mode — identity, not authentication
+            </span>
           )}
 
           {/* Account Switcher */}
