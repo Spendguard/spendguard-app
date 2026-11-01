@@ -1,0 +1,38 @@
+#[soroban_sdk::contractargs(name = "Args")]
+#[soroban_sdk::contractclient(name = "Client")]
+pub trait Contract {
+    fn get_version(env: soroban_sdk::Env) -> u32;
+    fn get_spending_limit_state(
+        env: soroban_sdk::Env,
+        account: soroban_sdk::Address,
+        context_rule_id: u32,
+    ) -> Result<SpendingLimitView, PolicyViewError>;
+    fn get_spending_limit_policy_views(
+        env: soroban_sdk::Env,
+        account: soroban_sdk::Address,
+        context_rule_id: u32,
+    ) -> Result<soroban_sdk::Vec<SpendingLimitPolicyView>, PolicyViewError>;
+}
+#[soroban_sdk::contracttype]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub struct SpendingLimitView {
+    pub cap: i128,
+    pub spent_in_window: i128,
+    pub window_ledgers: u32,
+    pub window_started_ledger: u32,
+}
+#[soroban_sdk::contracttype]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub struct SpendingLimitPolicyView {
+    pub policy: soroban_sdk::Address,
+    pub view: SpendingLimitView,
+}
+#[soroban_sdk::contracterror]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub enum PolicyViewError {
+    NoSpendingLimitPolicyInstalled = 1,
+    AccountNotFound = 2,
+    UnsupportedContextType = 3,
+    MultipleSpendingLimitPolicies = 4,
+}
+
