@@ -42,13 +42,18 @@ function identityPayload(email: string) {
 }
 
 export async function GET(request: Request): Promise<NextResponse> {
+  // Whether this deployment hands out demo sessions. The UI renders from this
+  // answer rather than its own guess, so a reviewer can never be shown a
+  // badge the server did not grant — nor have one hidden from them.
+  const demoMode = process.env.DEMO_AUTH === "true";
+
   const session = verifySessionToken(readSessionToken(request));
   if (!session) {
-    return NextResponse.json({ authenticated: false }, { status: 401 });
+    return NextResponse.json({ authenticated: false, demoMode }, { status: 401 });
   }
 
   const identity = await identityPayload(session.email);
-  return NextResponse.json({ authenticated: true, expiresAt: session.expiresAt, ...identity });
+  return NextResponse.json({ authenticated: true, demoMode, expiresAt: session.expiresAt, ...identity });
 }
 
 export async function POST(request: Request): Promise<NextResponse> {

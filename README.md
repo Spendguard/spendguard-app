@@ -10,7 +10,7 @@
 [![CI](https://github.com/Spendguard/spendguard-app/actions/workflows/ci.yml/badge.svg)](https://github.com/Spendguard/spendguard-app/actions/workflows/ci.yml)
 [![Node](https://img.shields.io/badge/node-%3E%3D18.18-339933?logo=node.js&logoColor=white)](package.json)
 [![TypeScript strict](https://img.shields.io/badge/typescript-strict-3178c6?logo=typescript&logoColor=white)](tsconfig.base.json)
-[![Tests](https://img.shields.io/badge/tests-160%20passing-10b981?logo=vitest&logoColor=white)](https://github.com/Spendguard/spendguard-app/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-165%20passing-10b981?logo=vitest&logoColor=white)](https://github.com/Spendguard/spendguard-app/actions/workflows/ci.yml)
 [![Stellar & Soroban](https://img.shields.io/badge/built%20for-Stellar%20%26%20Soroban-7c3aed?logo=stellar&logoColor=white)](#architecture)
 
 </div>
@@ -204,7 +204,7 @@ DEMO_AUTH="true"
 
 ```bash
 npm run typecheck   # tsc --noEmit across all workspaces
-npm test            # Vitest suites across SDK, Indexer, and Web (160 tests)
+npm test            # Vitest suites across SDK, Indexer, and Web (165 tests)
 
 # Terminal A — indexer (watch mode)
 npm -w @spendguard/indexer run dev
@@ -264,7 +264,7 @@ CI (GitHub Actions) runs **install, typecheck, lint, tests and build** on every 
 
 ### What the web suite covers
 
-`apps/web/test` runs 107 Vitest cases — `account-system` and `authorization` against the service/auth layers, plus render tests under jsdom (React Testing Library) for `/` and `/accounts/[id]`, and direct route-handler tests for `/api/accounts`, `/api/alerts` and `/api/webhooks`. The render tests assert the numbers the dashboard derives (alert totals, breach/near-miss counts, stroop→XLM conversion), that the multi-sig queue only loads when its tab is opened, and that a Viewer session cannot reach an Owner-only affordance. The feed tests pin the difference between an outage and an empty treasury: a configured-but-unreachable database must be a `503` that the chart, alert list and KPI cards each render as *unknown*, while `200 []` stays reserved for a feed that really has nothing. `db-pool` mocks the driver itself to prove the app opens **one** Postgres pool per connection string for a burst of requests and never closes it mid-request.
+`apps/web/test` runs 112 Vitest cases — `account-system` and `authorization` against the service/auth layers, plus render tests under jsdom (React Testing Library) for `/` and `/accounts/[id]`, and direct route-handler tests for `/api/accounts`, `/api/alerts` and `/api/webhooks`. The render tests assert the numbers the dashboard derives (alert totals, breach/near-miss counts, stroop→XLM conversion), that the multi-sig queue only loads when its tab is opened, and that a Viewer session cannot reach an Owner-only affordance. The feed tests pin the difference between an outage and an empty treasury: a configured-but-unreachable database must be a `503` that the chart, alert list and KPI cards each render as *unknown*, while `200 []` stays reserved for a feed that really has nothing. `db-pool` mocks the driver itself to prove the app opens **one** Postgres pool per connection string for a burst of requests and never closes it mid-request, and `header.demo-mode` pins the in-app *demo mode* badge to the server's answer — including the anonymous `/signin` visitor who is about to be handed a session for typing an email address.
 
 ---
 
@@ -291,7 +291,7 @@ Both feeds answer **`503` when a database is configured and the query failed**, 
 1. **Live testnet flow verified, but not yet a CI golden-fixture test.** Real SEP-41 transfers have been sent, ingested, and rendered end-to-end (transfer → indexer → Postgres → dashboard/API) against this repo's live testnet configuration. That verification is currently manual — the automated suite still relies on encode/decode round-trips plus one captured real on-chain value.
 2. **Only `spending_limit`-policy accounts are supported** so far (`simple_threshold`, `weighted_threshold` are next).
 3. **`spending_limit` is transfer-context only** — an upstream OpenZeppelin constraint, not a SpendGuard one.
-4. **The demo sign-in is identification, not authentication.** `/signin` hands out a signed session for a named email with no credential check, and is gated behind `DEMO_AUTH=true` so it cannot be mistaken for production auth. Authorization is real and server-side; the "who are you" step still needs an IdP.
+4. **The demo sign-in is identification, not authentication.** `/signin` hands out a signed session for a named email with no credential check, and is gated behind `DEMO_AUTH=true` so it cannot be mistaken for production auth. When that flag is on, the header carries a server-driven *Demo mode — identity, not authentication* badge (`GET /api/auth/session` answers `demoMode`), so a reviewer sees the caveat in the app and not only in this README. Authorization is real and server-side; the "who are you" step still needs an IdP (#10).
 
 SpendGuard is intentionally scoped to prove policy-aware, real on-chain observability first — not premature production hardening.
 

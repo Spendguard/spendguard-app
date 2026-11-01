@@ -11,6 +11,7 @@ import {
   POST as webhooksPOST,
 } from "../app/api/webhooks/route";
 import { GET as alertsGET } from "../app/api/alerts/route";
+import { GET as sessionGET } from "../app/api/auth/session/route";
 
 const SECRET = "test-session-secret-value";
 const MAIN_ADDRESS = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
@@ -50,7 +51,30 @@ beforeEach(() => {
   // The memory-store fallback is what these tests exercise; a real database
   // URL would send every assertion down the SQL path.
   delete process.env.DATABASE_URL;
+  delete process.env.DEMO_AUTH;
   resetMemoryStore();
+});
+
+describe("GET /api/auth/session", () => {
+  it("reports demo mode to the client, signed in or not", async () => {
+    process.env.DEMO_AUTH = "true";
+
+    const signedIn = await sessionGET(as("owner@spendguard.io", "/api/auth/session"));
+    expect(signedIn.status).toBe(200);
+    expect(((await signedIn.json()) as { demoMode: boolean }).demoMode).toBe(true);
+
+    // Anonymous still gets the flag: it is what the sign-in screen labels itself with.
+    const anonymous = await sessionGET(as(null, "/api/auth/session"));
+    expect(anonymous.status).toBe(401);
+    expect(((await anonymous.json()) as { demoMode: boolean }).demoMode).toBe(true);
+  });
+
+  it("reports no demo mode when the identity provider is the only way in", async () => {
+    delete process.env.DEMO_AUTH;
+    const res = await sessionGET(as("owner@spendguard.io", "/api/auth/session"));
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { demoMode: boolean }).demoMode).toBe(false);
+  });
 });
 
 describe("GET /api/accounts", () => {
