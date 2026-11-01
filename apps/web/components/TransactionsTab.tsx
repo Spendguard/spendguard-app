@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { FeedUnavailableError, throwIfFeedUnavailable } from "@/lib/feed";
 import type { SpendAlert } from "@spendguard/sdk";
 
 interface Transaction {
@@ -16,6 +17,7 @@ interface Transaction {
 
 export function TransactionsTab({ address }: { address: string }) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [unavailable, setUnavailable] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -27,12 +29,14 @@ export function TransactionsTab({ address }: { address: string }) {
         const eventsRes = await fetch(
           `/api/accounts?address=${encodeURIComponent(address)}&events=true`,
         );
+        await throwIfFeedUnavailable(eventsRes, "Transaction feed");
         if (eventsRes.ok) {
           const events = (await eventsRes.json()) as Transaction[];
           if (events.length > 0) {
             setTransactions(
               events.map((e) => ({ ...e, flag: "ON-CHAIN" as const })),
             );
+            setUnavailable(null);
             return;
           }
         }
@@ -41,6 +45,7 @@ export function TransactionsTab({ address }: { address: string }) {
         const res = await fetch(
           `/api/accounts?address=${encodeURIComponent(address)}&alerts=true`,
         );
+        await throwIfFeedUnavailable(res, "Transaction feed");
         if (res.ok) {
           const alerts = (await res.json()) as SpendAlert[];
           const txs: Transaction[] = alerts.map((a) => ({
@@ -57,9 +62,14 @@ export function TransactionsTab({ address }: { address: string }) {
             timestamp: a.raisedAt,
           }));
           setTransactions(txs);
+          setUnavailable(null);
         }
       } catch (err) {
         console.error("Failed to load transactions:", err);
+        if (err instanceof FeedUnavailableError) {
+          setTransactions([]);
+          setUnavailable(err.message);
+        }
       } finally {
         setLoading(false);
       }
@@ -73,6 +83,22 @@ export function TransactionsTab({ address }: { address: string }) {
         <div className="h-10 rounded-lg bg-zinc-900" />
         <div className="h-10 rounded-lg bg-zinc-900" />
         <div className="h-10 rounded-lg bg-zinc-900" />
+      </div>
+    );
+  }
+
+  if (unavailable) {
+    return (
+      <div
+        role="alert"
+        className="rounded-xl border border-dashed border-amber-800/60 bg-amber-950/20 px-6 py-8 text-center"
+      >
+        <p className="text-sm font-semibold text-amber-300">{unavailable}</p>
+        <p className="mt-1 text-xs text-zinc-500">
+          Settlement events for address {address.slice(0, 8)}... are unknown while the indexer
+          database is unreachable — an empty list here means the query failed, not that no
+          transfers happened.
+        </p>
       </div>
     );
   }

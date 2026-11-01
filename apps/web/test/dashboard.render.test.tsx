@@ -175,6 +175,44 @@ describe("dashboard (/)", () => {
     expect(harness.calls.some((u) => u.includes("events=true"))).toBe(true);
   });
 
+  it("labels an unreachable feed as unknown instead of a quiet treasury", async () => {
+    stubFetch(
+      signedInStubs([
+        {
+          match: /\/api\/accounts\?address=.*&alerts=true/,
+          status: 503,
+          body: { error: "Alert feed unavailable", detail: "The indexer database could not be queried." },
+        },
+        {
+          match: /\/api\/accounts\?address=.*&events=true/,
+          status: 503,
+          body: { error: "Settlement events unavailable", detail: "The indexer database could not be queried." },
+        },
+      ])
+    );
+
+    const { container } = await renderWithProviders(<DashboardPage />);
+
+    // Both feeds degrade to their own "unknown" panels — neither may render the
+    // reassuring empty state it shares a code path with.
+    expect(await screen.findByText("Spend history unavailable")).toBeInTheDocument();
+    expect(screen.queryByText(/No spend events recorded yet/)).toBeNull();
+    expect(screen.queryByText("No alerts have been raised for this account.")).toBeNull();
+
+    const outagePanels = await screen.findAllByRole("alert");
+    expect(outagePanels).toHaveLength(2);
+    expect(
+      outagePanels.map((panel) => panel.textContent).join(" ")
+    ).toMatch(/Alert history is unknown while the indexer database is unreachable/);
+
+    // KPIs derived from the unreadable feed refuse to claim a count.
+    await waitFor(() => expect(kpiValue("Total Ingested Alerts", container)).toBe("—"));
+    expect(kpiValue("Policy Breaches", container)).toBe("—");
+    expect(kpiValue("Near Misses", container)).toBe("—");
+    // ...while the ones read from the account store keep their real numbers.
+    expect(kpiValue("Total Accounts", container)).toBe("2");
+  });
+
   it("shows the onboarding empty state for a session with no treasuries", async () => {
     stubFetch([
       {

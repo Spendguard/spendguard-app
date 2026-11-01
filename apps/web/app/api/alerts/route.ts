@@ -4,8 +4,9 @@
  * GET /api/alerts?address=G...        — alerts for a specific account address
  * GET /api/alerts?address=G...&limit=N — paginate (default 50)
  *
- * Data source: PostgreSQL `alerts` table written by the indexer.
- * Falls back to an empty array when the DB is unreachable.
+ * Data source: PostgreSQL `alerts` table written by the indexer. Answers 503
+ * when a database is configured and cannot be queried, and `[]` only when no
+ * database is configured at all — an outage must not read as a quiet treasury.
  *
  * BigInt columns (event_amount, total_spent_in_window, cap) are returned
  * from postgres.js as strings; we pass them through as strings so JSON
@@ -15,6 +16,7 @@
 import { NextResponse } from "next/server";
 import postgres from "postgres";
 import { resolveIdentity, canReadAddress } from "@/lib/auth/session";
+import { feedUnavailable } from "@/lib/api/feed";
 
 // ── DB helper ─────────────────────────────────────────────────────────
 
@@ -53,6 +55,11 @@ export async function GET(request: Request): Promise<NextResponse> {
     }
 
     const db = getDb();
+
+    if (!db && process.env.DATABASE_URL) {
+      // A connection string that cannot even build a pool is an outage.
+      return feedUnavailable("Alert feed");
+    }
 
     if (db) {
       try {
@@ -108,12 +115,13 @@ export async function GET(request: Request): Promise<NextResponse> {
 
         return NextResponse.json(alerts);
       } catch (err) {
-        console.warn("GET /api/alerts: DB query failed, returning empty:", err);
+        console.error("GET /api/alerts: DB query failed:", err);
         await db.end({ timeout: 2 }).catch(() => {});
+        return feedUnavailable("Alert feed");
       }
     }
 
-    // No DB or query failed — return empty
+    // No database configured (demo store) — there are no ingested alerts.
     return NextResponse.json([]);
   } catch (err) {
     console.error("GET /api/alerts error:", err);

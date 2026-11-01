@@ -10,6 +10,7 @@ import {
   GET as webhooksGET,
   POST as webhooksPOST,
 } from "../app/api/webhooks/route";
+import { GET as alertsGET } from "../app/api/alerts/route";
 
 const SECRET = "test-session-secret-value";
 const MAIN_ADDRESS = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
@@ -104,6 +105,71 @@ describe("GET /api/accounts", () => {
     const res = await accountsGET(
       as("owner@spendguard.io", `/api/accounts?address=${MAIN_ADDRESS}&alerts=true`)
     );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([]);
+  });
+});
+
+describe("feed routes when the configured database is unreachable", () => {
+  /**
+   * Nothing listens on port 1, so `postgres()` builds a pool that can never
+   * connect. That is the outage these routes used to report as `200 []`.
+   */
+  const DOWN = "postgres://spendguard:correct-horse@127.0.0.1:1/spendguard";
+
+  const feeds: { label: string; run: () => Promise<Response> }[] = [
+    {
+      label: "the alerts alias",
+      run: () =>
+        accountsGET(
+          as("owner@spendguard.io", `/api/accounts?address=${MAIN_ADDRESS}&alerts=true`)
+        ),
+    },
+    {
+      label: "the events alias",
+      run: () =>
+        accountsGET(
+          as("owner@spendguard.io", `/api/accounts?address=${MAIN_ADDRESS}&events=true`)
+        ),
+    },
+    {
+      label: "the alerts route",
+      run: () => alertsGET(as("owner@spendguard.io", `/api/alerts?address=${MAIN_ADDRESS}`)),
+    },
+  ];
+
+  it.each(feeds)("$label answers 503, not an empty list, when the query fails", async ({ run }) => {
+    process.env.DATABASE_URL = DOWN;
+    try {
+      const res = await run();
+      expect(res.status).toBe(503);
+      const body = JSON.stringify(await res.json());
+      expect(body).toMatch(/unavailable/i);
+      expect(body).not.toMatch(/correct-horse/);
+    } finally {
+      delete process.env.DATABASE_URL;
+    }
+  });
+
+  it("keeps authentication and ownership in front of the outage", async () => {
+    process.env.DATABASE_URL = DOWN;
+    try {
+      const foreign = await foreignTreasury();
+      const notMine = await accountsGET(
+        as("viewer@spendguard.io", `/api/accounts?address=${foreign.address}&alerts=true`)
+      );
+      expect(notMine.status).toBe(403);
+
+      const anonymous = await alertsGET(as(null, `/api/alerts?address=${MAIN_ADDRESS}`));
+      expect(anonymous.status).toBe(401);
+    } finally {
+      delete process.env.DATABASE_URL;
+    }
+  });
+
+  it("still answers 200 [] for /api/alerts when no database is configured at all", async () => {
+    delete process.env.DATABASE_URL;
+    const res = await alertsGET(as("owner@spendguard.io", `/api/alerts?address=${MAIN_ADDRESS}`));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual([]);
   });

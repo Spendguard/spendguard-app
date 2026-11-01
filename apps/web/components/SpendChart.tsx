@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { FeedUnavailableError, throwIfFeedUnavailable } from "@/lib/feed";
 
 interface SpendDataPoint {
   date: string;
@@ -22,16 +23,22 @@ const STROOPS_PER_TOKEN = 10_000_000n;
  * Primary source: ingested on-chain settlement events (the indexer's
  * Postgres event store) — every real transfer shows up here. Falls back
  * to raised alerts so the chart still renders spend history when the
- * event store is unreachable.
+ * event store returns nothing.
+ *
+ * A 503 from either feed means the indexer database could not be queried.
+ * That is rethrown rather than answered with an empty array: a chart full
+ * of bars and a chart that has never seen a transfer are different facts,
+ * and the dashboard must not confuse an outage with a quiet treasury.
  */
 async function fetchSpendPoints(address: string): Promise<SpendDataPoint[]> {
+  const feedUrl = (query: string) =>
+    `/api/accounts?address=${encodeURIComponent(address)}&${query}`;
+
   // Primary source: ingested on-chain settlement events. A thrown fetch or
-  // an HTTP error both fall through to the alerts fallback below.
+  // an HTTP error (other than 503) both fall through to the alerts fallback.
   try {
-    const res = await fetch(
-      `/api/accounts?address=${encodeURIComponent(address)}&events=true`,
-      { cache: "no-store" },
-    );
+    const res = await fetch(feedUrl("events=true"), { cache: "no-store" });
+    await throwIfFeedUnavailable(res, "Spend feed");
     if (res.ok) {
       const events = (await res.json()) as {
         timestamp: string;
@@ -49,16 +56,15 @@ async function fetchSpendPoints(address: string): Promise<SpendDataPoint[]> {
         }));
       }
     }
-  } catch {
+  } catch (err) {
+    if (err instanceof FeedUnavailableError) throw err;
     // fall through to the alerts fallback
   }
 
   // Fallback: alert events (breach / near-miss spend history)
   try {
-    const alertsRes = await fetch(
-      `/api/accounts?address=${encodeURIComponent(address)}&alerts=true`,
-      { cache: "no-store" },
-    );
+    const alertsRes = await fetch(feedUrl("alerts=true"), { cache: "no-store" });
+    await throwIfFeedUnavailable(alertsRes, "Spend feed");
     if (alertsRes.ok) {
       const alerts = (await alertsRes.json()) as {
         raisedAt: string;
@@ -72,7 +78,8 @@ async function fetchSpendPoints(address: string): Promise<SpendDataPoint[]> {
         amount: (BigInt(a.eventAmount) / STROOPS_PER_TOKEN).toString(),
       }));
     }
-  } catch {
+  } catch (err) {
+    if (err instanceof FeedUnavailableError) throw err;
     // ignore — the chart renders its empty state
   }
 
@@ -82,6 +89,7 @@ async function fetchSpendPoints(address: string): Promise<SpendDataPoint[]> {
 export function SpendChart({ address, refreshMs = 30_000 }: SpendChartProps) {
   const [data, setData] = useState<SpendDataPoint[]>([]);
   const [loading, setLoading] = useState(true);
+  const [feedDown, setFeedDown] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
@@ -90,8 +98,10 @@ export function SpendChart({ address, refreshMs = 30_000 }: SpendChartProps) {
       const points = await fetchSpendPoints(address);
       setData(points);
       setLastUpdated(new Date());
+      setFeedDown(false);
       setError(null);
     } catch (err) {
+      setFeedDown(err instanceof FeedUnavailableError);
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoading(false);
@@ -109,6 +119,18 @@ export function SpendChart({ address, refreshMs = 30_000 }: SpendChartProps) {
       <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6">
         <div className="mb-4 h-5 w-32 animate-pulse rounded bg-zinc-800" />
         <div className="h-48 animate-pulse rounded bg-zinc-800" />
+      </div>
+    );
+  }
+
+  if (feedDown) {
+    return (
+      <div role="alert" className="rounded-xl border border-dashed border-amber-800/60 bg-amber-950/20 p-6">
+        <p className="text-sm font-semibold text-amber-300">Spend history unavailable</p>
+        <p className="mt-1 text-xs text-zinc-500">
+          The indexer database could not be queried, so this account&apos;s spending is
+          unknown — not zero. The chart will resume on the next refresh.
+        </p>
       </div>
     );
   }

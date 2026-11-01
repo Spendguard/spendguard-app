@@ -9,11 +9,15 @@
  * Every response is scoped to the session: previously any anonymous caller
  * could enumerate every treasury in the deployment, and read any address's
  * settlement events and alerts.
+ *
+ * The address-scoped aliases answer 503 when a database is configured but the
+ * query failed. `[]` now means "asked, nothing there" — never "could not ask".
  */
 
 import { NextResponse } from "next/server";
 import { AccountService } from "@/lib/services/account-service";
 import { resolveIdentity, canReadAddress } from "@/lib/auth/session";
+import { feedUnavailable } from "@/lib/api/feed";
 import type { AccountType, AccountStatus } from "@spendguard/sdk";
 import postgres from "postgres";
 
@@ -57,6 +61,11 @@ export async function GET(request: Request): Promise<NextResponse> {
 
     if (wantsEvents && address) {
       const db = getDb();
+      if (!db && process.env.DATABASE_URL) {
+        // A connection string that will not even build a pool is an outage,
+        // not an empty ledger.
+        return feedUnavailable("Settlement events");
+      }
       if (db) {
         try {
           const rows = await db`
@@ -91,16 +100,22 @@ export async function GET(request: Request): Promise<NextResponse> {
 
           return NextResponse.json(events);
         } catch (err) {
-          console.warn("GET /api/accounts events query failed:", err);
+          console.error("GET /api/accounts events query failed:", err);
           await db.end({ timeout: 2 }).catch(() => {});
+          // A configured-but-unreadable database is not the same as an empty
+          // one; saying so is the whole point of the 503.
+          return feedUnavailable("Settlement events");
         }
       }
-      // No DB or query failed — return empty events
+      // No database configured — the demo store has no ingested events.
       return NextResponse.json([]);
     }
 
     if (wantsAlerts && address) {
       const db = getDb();
+      if (!db && process.env.DATABASE_URL) {
+        return feedUnavailable("Alert feed");
+      }
       if (db) {
         try {
           const rows = await db`
@@ -139,11 +154,12 @@ export async function GET(request: Request): Promise<NextResponse> {
 
           return NextResponse.json(alerts);
         } catch (err) {
-          console.warn("GET /api/accounts alerts query failed:", err);
+          console.error("GET /api/accounts alerts query failed:", err);
           await db.end({ timeout: 2 }).catch(() => {});
+          return feedUnavailable("Alert feed");
         }
       }
-      // No DB or query failed — return empty alerts
+      // No database configured — the demo store has no raised alerts.
       return NextResponse.json([]);
     }
 
