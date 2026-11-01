@@ -10,7 +10,7 @@
 [![CI](https://github.com/Spendguard/spendguard-app/actions/workflows/ci.yml/badge.svg)](https://github.com/Spendguard/spendguard-app/actions/workflows/ci.yml)
 [![Node](https://img.shields.io/badge/node-%3E%3D18.18-339933?logo=node.js&logoColor=white)](package.json)
 [![TypeScript strict](https://img.shields.io/badge/typescript-strict-3178c6?logo=typescript&logoColor=white)](tsconfig.base.json)
-[![Tests](https://img.shields.io/badge/tests-64%20passing-10b981?logo=vitest&logoColor=white)](https://github.com/Spendguard/spendguard-app/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-149%20passing-10b981?logo=vitest&logoColor=white)](https://github.com/Spendguard/spendguard-app/actions/workflows/ci.yml)
 [![Stellar & Soroban](https://img.shields.io/badge/built%20for-Stellar%20%26%20Soroban-7c3aed?logo=stellar&logoColor=white)](#architecture)
 
 </div>
@@ -204,7 +204,7 @@ DEMO_AUTH="true"
 
 ```bash
 npm run typecheck   # tsc --noEmit across all workspaces
-npm test            # Vitest suites across SDK, Indexer, and Web (64 tests)
+npm test            # Vitest suites across SDK, Indexer, and Web (149 tests)
 
 # Terminal A — indexer (watch mode)
 npm -w @spendguard/indexer run dev
@@ -260,7 +260,11 @@ The dashboard's **Spend History** chart and **Transactions** tab read these inge
 | `npm -w @spendguard/indexer run trustline:usdc` | Adds the monitored-asset trustline (`-- G...`; defaults to `SIMULATION_SOURCE_ACCOUNT`) — required before an account can send or receive the asset |
 | `npm -w @spendguard/indexer run send:transfer` | Sends a real testnet transfer (`-- <amount_USDC> [destination]`; default 5 USDC, funds a fresh Friendbot destination) to generate live on-chain activity |
 
-CI (GitHub Actions) runs **install, typecheck, lint, and tests** on every push and pull request to `main`.
+CI (GitHub Actions) runs **install, typecheck, lint, tests and build** on every push and pull request to `main`, and branch protection requires that job to pass.
+
+### What the web suite covers
+
+`apps/web/test` runs 96 Vitest cases — `account-system` and `authorization` against the service/auth layers, plus render tests under jsdom (React Testing Library) for `/` and `/accounts/[id]`, and direct route-handler tests for `/api/accounts` and `/api/webhooks`. The render tests assert the numbers the dashboard derives (alert totals, breach/near-miss counts, stroop→XLM conversion), that the multi-sig queue only loads when its tab is opened, and that a Viewer session cannot reach an Owner-only affordance.
 
 ---
 
