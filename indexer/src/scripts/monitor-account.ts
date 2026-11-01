@@ -5,12 +5,13 @@
  * indexer attributes its SEP-41 transfer events as x402 settlements.
  *
  * Usage:
- *   npm -w @spendguard/indexer run monitor:account [-- G... [context_rule_id] [label]]
+ *   npm -w @spendguard/indexer run monitor:account [-- G...|C... [context_rule_id] [label]]
  *
  * Defaults to SIMULATION_SOURCE_ACCOUNT (the funded testnet account) with
  * context_rule_id 1 when no arguments are given.
  */
 
+import { StrKey } from "@stellar/stellar-sdk";
 import postgres from "postgres";
 import { loadScriptEnv } from "./env.js";
 
@@ -32,8 +33,15 @@ async function main(): Promise<void> {
   if (Number.isNaN(contextRuleId)) {
     throw new Error(`Invalid context_rule_id: "${ruleArg}"`);
   }
-  if (!address.startsWith("G")) {
-    throw new Error(`Address must start with G..., got: "${address}"`);
+  // The `from` topic of a SEP-41 transfer is the sender's ledger address, and
+  // a Soroban smart account is addressed as C… — the very accounts a
+  // spending-limit policy guards. `event-poller.ts` tells operators to
+  // register those, so accepting only G… made the smart-account flow
+  // unregisterable from this script.
+  if (!StrKey.isValidEd25519PublicKey(address) && !StrKey.isValidContract(address)) {
+    throw new Error(
+      `Address must be a valid G… account or C… contract address, got: "${address}"`,
+    );
   }
 
   const sql = postgres(env.databaseUrl, { max: 2, idle_timeout: 10 });
