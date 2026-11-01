@@ -42,7 +42,7 @@ Soroban RPC nodes only retain approximately **7 days of event history**. To main
 
 1. **`EventPoller` (`event-poller.ts`)**: Continuous loop that polls `getEvents` from Soroban RPC, decodes SEP-41 transfer and `spending_limit_enforced` events, and saves the ledger cursor.
 2. **`BreachDetector` (`breach-detector.ts`)**: Queries the deployed `policy-view-helper` contract via simulation to check live spent amount vs cap. Raises `near_miss` (e.g. 90% of cap) or `breach` (100%+ of cap) alerts.
-3. **`AlertDispatcher` (`alert-dispatcher.ts`)**: Delivers JSON webhook POST notifications with bearer authentication signatures to operator-configured URLs.
+3. **`AlertDispatcher` (`alert-dispatcher.ts`)**: Delivers JSON webhook POST notifications with bearer authentication signatures to operator-configured URLs. Because that URL is operator-supplied and the request carries a secret, every target is guarded before a socket opens — see *Webhook destination policy* below.
 4. **`Database` (`db.ts`)**: Database wrapper managing schema migration execution (`migrations/*.sql`), cursor persistence, settlement event storage, and monitored account lists.
 
 ---
@@ -69,6 +69,24 @@ SQL migrations are applied automatically on startup from `migrations/`:
 | `SIMULATION_SOURCE_ACCOUNT` | No | Funded G... account for simulation calls |
 | `NEAR_MISS_THRESHOLD_PCT` | No | Near-miss alert threshold % (default: `90`) |
 | `POLL_INTERVAL_MS` | No | Polling interval in ms (default: `10000`) |
+| `WEBHOOK_TIMEOUT_MS` | No | Per-request webhook timeout in ms (default: `5000`) |
+| `WEBHOOK_ALLOW_PRIVATE_NETWORKS` | No | `true` relaxes the destination policy for local development only (default: `false`) |
+
+---
+
+## Webhook destination policy
+
+Webhook URLs are operator-supplied configuration, and the indexer POSTs to them with a bearer secret attached. Unguarded, that is an SSRF primitive: point a hook at `http://169.254.169.254/`, at Redis on `127.0.0.1:6379`, or at a name that resolves to either, and the deployment delivers a signed request to wherever the configuration wanted to reach.
+
+`AlertDispatcher` therefore checks the destination **before** it opens a socket:
+
+1. **Shape** — `checkWebhookUrlShape()` from `@spendguard/sdk`: `http`/`https` only, no embedded credentials, no port other than the scheme default, no special-use hostname (`.localhost`, `.local`, `.internal`, …), no IP literal in a non-public range. `new URL()` normalises `2130706433`, `0177.0.0.1` and `0x7f000001` into a dotted quad, so an address cannot hide behind a spelling.
+2. **Resolution** — the hostname is resolved and **every** answer must be publicly routable; a name with one public and one private record is refused, as are loopback, RFC 1918, link-local (including the cloud metadata address), CGNAT, multicast, reserved and documentation ranges, and IPv6 loopback / ULA / link-local — with `::ffff:`-mapped IPv4 unwrapped first. Unparseable addresses fail closed.
+3. **Redirects** — requested with `redirect: "manual"` and followed by the dispatcher, up to `maxRedirects` (3), re-running steps 1–2 on each hop. A public host answering `302 → http://169.254.169.254` is the same request the policy already refused.
+
+A refused dispatch never marks the alert as delivered, so the next poll cycle retries it; the reason is logged, never the secret. `apps/web`'s `POST /api/webhooks` applies the same shape check at write time, so an unusable target does not reach the table.
+
+Setting `WEBHOOK_ALLOW_PRIVATE_NETWORKS=true` relaxes steps 1–2 for local development (delivering to `http://localhost:3000/hook`). The protocol and embedded-credential rules still apply, and a deployment that faces the internet should leave it unset.
 
 ---
 

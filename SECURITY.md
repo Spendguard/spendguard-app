@@ -12,7 +12,7 @@ SpendGuard is a **monitoring layer** — it reads public on-chain data and compu
 The security posture of this project is therefore limited to:
 
 - **Data integrity**: ensuring that ingested events are correctly decoded and stored.
-- **Alert delivery**: ensuring that breach/near-miss notifications reach their configured webhooks.
+- **Alert delivery**: ensuring that breach/near-miss notifications reach their configured webhooks — and that an operator-supplied webhook URL cannot be used to make the indexer POST a signed payload somewhere it was never meant to reach. Destination policy lives in `@spendguard/sdk` (`webhook-target.ts`) and is enforced twice: at write time by `POST /api/webhooks`, and at delivery time by the dispatcher, which resolves the host, refuses any address that is not publicly routable, and re-checks every redirect hop.
 - **Access control**: ensuring that the dashboard API is appropriately protected in production.
 
 ## Reporting a Vulnerability

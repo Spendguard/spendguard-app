@@ -197,7 +197,9 @@ async function main(): Promise<void> {
     db,
     config.nearMissThresholdPct,
   );
-  const alertDispatcher = new AlertDispatcher(db, config.webhookTimeoutMs);
+  const alertDispatcher = new AlertDispatcher(db, config.webhookTimeoutMs, {
+    allowPrivateNetworks: config.webhookAllowPrivateNetworks,
+  });
 
   // 6. Start the event poller
   const poller = new EventPoller(

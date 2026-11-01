@@ -52,6 +52,7 @@ beforeEach(() => {
   // URL would send every assertion down the SQL path.
   delete process.env.DATABASE_URL;
   delete process.env.DEMO_AUTH;
+  delete process.env.WEBHOOK_ALLOW_PRIVATE_NETWORKS;
   resetMemoryStore();
 });
 
@@ -278,6 +279,47 @@ describe("/api/webhooks", () => {
   it.each(postBodies)("rejects %s before touching the database", async (_label, body) => {
     const res = await webhooksPOST(as("owner@spendguard.io", "/api/webhooks", jsonInit("POST", body)));
     expect(res.status).toBe(400);
+  });
+
+  const ssrfTargets: Array<[string, RegExp]> = [
+    ["http://169.254.169.254/latest/meta-data/", /not a routable public address/],
+    ["http://10.0.0.9/hook", /not a routable public address/],
+    ["http://[::1]/hook", /not a routable public address/],
+    ["http://127.0.0.1:6379/", /Redis/],
+    ["https://db.internal:5432/hook", /PostgreSQL/],
+    ["https://hooks.example.com:8080/hook", /port 8080 is not allowed/],
+    ["http://localhost.localdomain/hook", /special-use hostname/],
+    ["file:///etc/passwd", /Unsupported webhook protocol/],
+    ["https://admin:hunter2@hooks.example.com/hook", /must not embed credentials/],
+  ];
+
+  it.each(ssrfTargets)(
+    "refuses the SSRF-shaped destination %s with a reason",
+    async (url, reason) => {
+      const res = await webhooksPOST(
+        as("owner@spendguard.io", "/api/webhooks", jsonInit("POST", { url, secret: "s3cr3t-value" }))
+      );
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toMatch(reason);
+      expect(JSON.stringify(body)).not.toMatch(/s3cr3t-value/);
+    },
+  );
+
+  it("only relaxes destination rules when the development switch is on", async () => {
+    process.env.WEBHOOK_ALLOW_PRIVATE_NETWORKS = "true";
+
+    const res = await webhooksPOST(
+      as("owner@spendguard.io", "/api/webhooks", jsonInit("POST", { url: "http://127.0.0.1:3000/hook" }))
+    );
+    // Accepted as a destination — and then it fails like any other config write
+    // with no database behind it, which is the point: the policy did not refuse it.
+    expect(res.status).toBe(500);
+
+    const stillRefused = await webhooksPOST(
+      as("owner@spendguard.io", "/api/webhooks", jsonInit("POST", { url: "file:///etc/passwd" }))
+    );
+    expect(stillRefused.status).toBe(400);
   });
 
   it("requires an id to delete a webhook", async () => {

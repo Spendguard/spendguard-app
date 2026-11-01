@@ -10,7 +10,7 @@
 [![CI](https://github.com/Spendguard/spendguard-app/actions/workflows/ci.yml/badge.svg)](https://github.com/Spendguard/spendguard-app/actions/workflows/ci.yml)
 [![Node](https://img.shields.io/badge/node-%3E%3D18.18-339933?logo=node.js&logoColor=white)](package.json)
 [![TypeScript strict](https://img.shields.io/badge/typescript-strict-3178c6?logo=typescript&logoColor=white)](tsconfig.base.json)
-[![Tests](https://img.shields.io/badge/tests-165%20passing-10b981?logo=vitest&logoColor=white)](https://github.com/Spendguard/spendguard-app/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-234%20passing-10b981?logo=vitest&logoColor=white)](https://github.com/Spendguard/spendguard-app/actions/workflows/ci.yml)
 [![Stellar & Soroban](https://img.shields.io/badge/built%20for-Stellar%20%26%20Soroban-7c3aed?logo=stellar&logoColor=white)](#architecture)
 
 </div>
@@ -153,6 +153,7 @@ SpendGuard is built on a simple principle: **the least powerful tool that solves
 - 👀 Reads only public on-chain data
 - 🎭 Sessions carry identity only; roles are resolved from membership per request, so a stolen-or-forged client payload cannot escalate
 - 📦 Attack surface limited to event-decoding correctness, alert delivery, and API access control
+- 🧱 Webhook destinations are policy-checked before they are stored *and* before the socket opens: no metadata endpoints, no RFC 1918 / loopback / CGNAT, no database ports, and redirects are followed manually one guarded hop at a time
 - 📖 See [SECURITY.md](./SECURITY.md) for the full policy and responsible-disclosure process
 
 ---
@@ -190,6 +191,15 @@ SIMULATION_SOURCE_ACCOUNT_SECRET="<account secret — only needed by send:transf
 
 NEAR_MISS_THRESHOLD_PCT=90
 POLL_INTERVAL_MS=10000
+WEBHOOK_TIMEOUT_MS=5000
+
+# Alert webhooks may only point at a publicly routable http(s) endpoint on the
+# scheme's default port. The dispatcher refuses — before opening a socket — any
+# host that resolves to loopback, RFC 1918, link-local (169.254.0.0/16, the cloud
+# metadata address), CGNAT, multicast or reserved space, and it re-applies the
+# same rule to every redirect hop. Leave this unset in any real deployment; it
+# exists so a dev can point a hook at http://localhost:3000.
+# WEBHOOK_ALLOW_PRIVATE_NETWORKS=false
 
 # Session signing — any value of >=16 chars, e.g. `openssl rand -hex 32`.
 # Left unset, the web app falls back to a per-process secret and sessions stop
@@ -204,7 +214,7 @@ DEMO_AUTH="true"
 
 ```bash
 npm run typecheck   # tsc --noEmit across all workspaces
-npm test            # Vitest suites across SDK, Indexer, and Web (165 tests)
+npm test            # Vitest suites across SDK, Indexer, and Web (234 tests)
 
 # Terminal A — indexer (watch mode)
 npm -w @spendguard/indexer run dev
@@ -264,7 +274,11 @@ CI (GitHub Actions) runs **install, typecheck, lint, tests and build** on every 
 
 ### What the web suite covers
 
-`apps/web/test` runs 112 Vitest cases — `account-system` and `authorization` against the service/auth layers, plus render tests under jsdom (React Testing Library) for `/` and `/accounts/[id]`, and direct route-handler tests for `/api/accounts`, `/api/alerts` and `/api/webhooks`. The render tests assert the numbers the dashboard derives (alert totals, breach/near-miss counts, stroop→XLM conversion), that the multi-sig queue only loads when its tab is opened, and that a Viewer session cannot reach an Owner-only affordance. The feed tests pin the difference between an outage and an empty treasury: a configured-but-unreachable database must be a `503` that the chart, alert list and KPI cards each render as *unknown*, while `200 []` stays reserved for a feed that really has nothing. `db-pool` mocks the driver itself to prove the app opens **one** Postgres pool per connection string for a burst of requests and never closes it mid-request, and `header.demo-mode` pins the in-app *demo mode* badge to the server's answer — including the anonymous `/signin` visitor who is about to be handed a session for typing an email address.
+`apps/web/test` runs 122 Vitest cases — `account-system` and `authorization` against the service/auth layers, plus render tests under jsdom (React Testing Library) for `/` and `/accounts/[id]`, and direct route-handler tests for `/api/accounts`, `/api/alerts` and `/api/webhooks`. The render tests assert the numbers the dashboard derives (alert totals, breach/near-miss counts, stroop→XLM conversion), that the multi-sig queue only loads when its tab is opened, and that a Viewer session cannot reach an Owner-only affordance. The feed tests pin the difference between an outage and an empty treasury: a configured-but-unreachable database must be a `503` that the chart, alert list and KPI cards each render as *unknown*, while `200 []` stays reserved for a feed that really has nothing. `db-pool` mocks the driver itself to prove the app opens **one** Postgres pool per connection string for a burst of requests and never closes it mid-request, `header.demo-mode` pins the in-app *demo mode* badge to the server's answer — including the anonymous `/signin` visitor who is about to be handed a session for typing an email address, and the webhook tests assert that a destination pointing at a metadata endpoint, a private range, a database port or an embedded credential is refused with `400` and a reason, before anything is written and without leaking the signing secret.
+
+### What the SDK and indexer suites cover
+
+`packages/sdk/test` (78 cases) holds the pure logic: policy reads, permission matrix, XDR round-trips, and `webhook-target` — the destination policy itself, with a table of every address class a webhook must not receive (`169.254.169.254`, `127.0.0.0/8`, `10/8`, `172.16/12`, `192.168/16`, `100.64/10` CGNAT, multicast and reserved ranges, IPv6 loopback/ULA/link-local, `::ffff:`-mapped IPv4, plus unparseable input which fails closed) and the IPv6 parser that backs them. `indexer/test` (34 cases) covers breach detection, event decoding against a captured testnet fixture, and the dispatcher end-to-end with a stubbed resolver and fetch: a public target is delivered to with `redirect: "manual"` and the bearer header attached; a target that *resolves* to `169.254.169.254` is refused with **zero** fetch calls, so the secret never leaves the process; a hostname with one public and one internal answer is refused outright; a `302` toward an internal address is refused before that hop is contacted; and a refused dispatch never marks the alert delivered.
 
 ---
 
@@ -282,7 +296,7 @@ Both feeds answer **`503` when a database is configured and the query failed**, 
 - `GET /api/stellar/account?address=G…&ruleId=…` — live on-chain account state (sequence, XLM balance via Horizon REST, RPC reachability)
 - `GET/PATCH/DELETE /api/accounts/[id]` — account detail, update, archive/delete
 - `GET/POST /api/accounts/[id]/members` · `/policies` · `/budgets` · `/multisig` · `/settings` · `/audit-logs`
-- `GET/POST/DELETE /api/webhooks` — alert delivery endpoints; requires Owner or Admin on any treasury, since these decide where alert payloads and a signing secret are sent
+- `GET/POST/DELETE /api/webhooks` — alert delivery endpoints; requires Owner or Admin on any treasury, since these decide where alert payloads and a signing secret are sent. `POST` answers **`400` with the reason** for a URL the destination policy rejects (non-http(s) scheme, embedded credentials, a database/admin port, a special-use hostname, a non-public IP literal) — an unusable target never reaches the table the dispatcher reads.
 
 ---
 
