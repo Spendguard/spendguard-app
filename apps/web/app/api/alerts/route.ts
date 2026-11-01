@@ -14,21 +14,9 @@
  */
 
 import { NextResponse } from "next/server";
-import postgres from "postgres";
 import { resolveIdentity, canReadAddress } from "@/lib/auth/session";
 import { feedUnavailable } from "@/lib/api/feed";
-
-// ── DB helper ─────────────────────────────────────────────────────────
-
-function getDb(): postgres.Sql | null {
-  const url = process.env.DATABASE_URL;
-  if (!url) return null;
-  try {
-    return postgres(url, { max: 2, idle_timeout: 10 });
-  } catch {
-    return null;
-  }
-}
+import { getDb } from "@/lib/db";
 
 // ── GET ───────────────────────────────────────────────────────────────
 
@@ -98,7 +86,6 @@ export async function GET(request: Request): Promise<NextResponse> {
               LIMIT ${limit}
             `;
 
-        await db.end({ timeout: 2 });
 
         const alerts = rows.map((r) => ({
           id: r.id as string,
@@ -116,7 +103,6 @@ export async function GET(request: Request): Promise<NextResponse> {
         return NextResponse.json(alerts);
       } catch (err) {
         console.error("GET /api/alerts: DB query failed:", err);
-        await db.end({ timeout: 2 }).catch(() => {});
         return feedUnavailable("Alert feed");
       }
     }

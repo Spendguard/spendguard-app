@@ -1,4 +1,4 @@
-import postgres from "postgres";
+import { getDb } from "@/lib/db";
 import {
   TreasuryAccount,
   AccountType,
@@ -241,18 +241,6 @@ export function resetMemoryStore(): void {
   memoryStore.reset();
 }
 
-// ── Database Helper ───────────────────────────────────────────────────
-
-function getDb(): postgres.Sql | null {
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) return null;
-  try {
-    return postgres(databaseUrl, { max: 2, idle_timeout: 10 });
-  } catch {
-    return null;
-  }
-}
-
 // ── Account Service ───────────────────────────────────────────────────
 
 type AccountFilters = { status?: AccountStatus; type?: AccountType; search?: string };
@@ -297,7 +285,6 @@ export class AccountService {
           WHERE lower(am.email) = lower(${email})
           ORDER BY ta.created_at DESC
         `;
-        await db.end({ timeout: 2 });
         return filterAccounts(
           rows.map((r) => ({
             id: r.id as string,
@@ -344,7 +331,6 @@ export class AccountService {
           FROM treasury_accounts
           ORDER BY created_at DESC
         `;
-        await db.end({ timeout: 2 });
         return filterAccounts(
           accounts.map((r) => ({
             id: r.id as string,
@@ -480,7 +466,6 @@ export class AccountService {
           INSERT INTO treasury_accounts (id, name, description, address, type, status, context_rule_id, created_at, updated_at)
           VALUES (${newAccount.id}, ${newAccount.name}, ${newAccount.description}, ${newAccount.address}, ${newAccount.type}, ${newAccount.status}, ${newAccount.contextRuleId}, ${now}, ${now})
         `;
-        await db.end({ timeout: 2 });
       } catch (err) {
         console.warn("DB insert failed, stored in memory:", err);
       }

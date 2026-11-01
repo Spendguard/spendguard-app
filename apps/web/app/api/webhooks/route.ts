@@ -11,18 +11,10 @@
  */
 
 import { NextResponse } from "next/server";
-import postgres from "postgres";
 import { resolvePrivilegedActor } from "@/lib/auth/session";
+import { getDbOrThrow } from "@/lib/db";
 
 // ── Helpers ───────────────────────────────────────────────────────────
-
-function getDb(): postgres.Sql {
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) {
-    throw new Error("DATABASE_URL is not configured");
-  }
-  return postgres(databaseUrl, { max: 2, idle_timeout: 10 });
-}
 
 function maskSecret(secret: string | null): string | null {
   if (!secret || secret.length < 8) return secret;
@@ -38,7 +30,7 @@ export async function GET(request: Request): Promise<NextResponse> {
   }
 
   try {
-    const sql = getDb();
+    const sql = getDbOrThrow();
 
     const configs = await sql`
       SELECT id, url, secret, alert_levels, enabled, created_at, updated_at
@@ -56,7 +48,6 @@ export async function GET(request: Request): Promise<NextResponse> {
       updatedAt: (c.updated_at as Date).toISOString(),
     }));
 
-    await sql.end({ timeout: 3 });
     return NextResponse.json(mapped);
   } catch (err) {
     console.error("GET /api/webhooks error:", err);
@@ -112,7 +103,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
     }
 
-    const sql = getDb();
+    const sql = getDbOrThrow();
 
     if (body.id) {
       // Update existing webhook
@@ -128,7 +119,6 @@ export async function POST(request: Request): Promise<NextResponse> {
       `;
 
       if (result.length === 0) {
-        await sql.end({ timeout: 3 });
         return NextResponse.json(
           { error: "Webhook config not found" },
           { status: 404 },
@@ -136,7 +126,6 @@ export async function POST(request: Request): Promise<NextResponse> {
       }
 
       const row = result[0]!;
-      await sql.end({ timeout: 3 });
 
       return NextResponse.json({
         id: row.id as string,
@@ -156,7 +145,6 @@ export async function POST(request: Request): Promise<NextResponse> {
     `;
 
     const row = result[0]!;
-    await sql.end({ timeout: 3 });
 
     return NextResponse.json(
       {
@@ -197,9 +185,8 @@ export async function DELETE(request: Request): Promise<NextResponse> {
       );
     }
 
-    const sql = getDb();
+    const sql = getDbOrThrow();
     await sql`DELETE FROM webhook_configs WHERE id = ${id}`;
-    await sql.end({ timeout: 3 });
 
     return NextResponse.json({ deleted: true });
   } catch (err) {
