@@ -7,11 +7,13 @@ import { AccountTypeBadge } from "@/components/AccountTypeBadge";
 import { SpendChart } from "@/components/SpendChart";
 import { AlertList } from "@/components/AlertList";
 import { LiveSpendingCard } from "@/components/LiveSpendingCard";
+import { FeedUnavailableError, throwIfFeedUnavailable } from "@/lib/feed";
 import type { SpendAlert } from "@spendguard/sdk";
 
 export default function DashboardPage() {
   const { accounts, activeAccount, setActiveAccountId, loading } = useAccount();
   const [alerts, setAlerts] = useState<SpendAlert[]>([]);
+  const [alertsUnavailable, setAlertsUnavailable] = useState<string | null>(null);
   const [alertsLoading, setAlertsLoading] = useState(false);
 
   useEffect(() => {
@@ -20,12 +22,18 @@ export default function DashboardPage() {
       try {
         setAlertsLoading(true);
         const res = await fetch(`/api/accounts?address=${activeAccount.address}&alerts=true`);
+        await throwIfFeedUnavailable(res, "Alert feed");
         if (res.ok) {
           const data = (await res.json()) as SpendAlert[];
           setAlerts(data);
+          setAlertsUnavailable(null);
         }
       } catch (err) {
         console.error("Failed to load alerts:", err);
+        if (err instanceof FeedUnavailableError) {
+          setAlerts([]);
+          setAlertsUnavailable(err.message);
+        }
       } finally {
         setAlertsLoading(false);
       }
@@ -70,6 +78,8 @@ export default function DashboardPage() {
 
   const breachCount = alerts.filter((a) => a.level === "breach").length;
   const nearMissCount = alerts.filter((a) => a.level === "near_miss").length;
+  // While the alert feed is unreadable these counts are unknown, not zero.
+  const alertsUnknown = alertsUnavailable !== null;
 
   return (
     <div className="space-y-8">
@@ -120,15 +130,15 @@ export default function DashboardPage() {
       <div className="grid gap-4 sm:grid-cols-4 xl:grid-cols-5">
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 backdrop-blur-sm shadow-sm">
           <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">Total Ingested Alerts</p>
-          <p className="mt-1 text-3xl font-extrabold text-white">{alerts.length}</p>
+          <p className="mt-1 text-3xl font-extrabold text-white">{alertsUnknown ? "—" : alerts.length}</p>
         </div>
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 backdrop-blur-sm shadow-sm">
           <p className="text-[11px] font-bold uppercase tracking-wider text-red-400">Policy Breaches</p>
-          <p className="mt-1 text-3xl font-extrabold text-red-400">{breachCount}</p>
+          <p className="mt-1 text-3xl font-extrabold text-red-400">{alertsUnknown ? "—" : breachCount}</p>
         </div>
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 backdrop-blur-sm shadow-sm">
           <p className="text-[11px] font-bold uppercase tracking-wider text-amber-400">Near Misses</p>
-          <p className="mt-1 text-3xl font-extrabold text-amber-400">{nearMissCount}</p>
+          <p className="mt-1 text-3xl font-extrabold text-amber-400">{alertsUnknown ? "—" : nearMissCount}</p>
         </div>
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 backdrop-blur-sm shadow-sm">
           <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-400">Total Accounts</p>
@@ -209,7 +219,7 @@ export default function DashboardPage() {
           {alertsLoading ? (
             <div className="animate-pulse h-32 rounded-2xl bg-zinc-900" />
           ) : (
-            <AlertList alerts={alerts} />
+            <AlertList alerts={alerts} unavailable={alertsUnavailable} />
           )}
         </div>
       )}

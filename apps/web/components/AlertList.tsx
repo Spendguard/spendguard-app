@@ -2,6 +2,11 @@ import type { SpendAlert } from "@spendguard/sdk";
 
 interface AlertListProps {
   alerts: SpendAlert[];
+  /**
+   * Set when the feed could not be read. Rendering the "no alerts" panel in
+   * that case would claim the treasury is quiet when it is actually unknown.
+   */
+  unavailable?: string | null;
 }
 
 function formatAmount(stroops: bigint | string): string {
@@ -26,7 +31,22 @@ function AlertBadge({ level }: { level: string }) {
   );
 }
 
-export function AlertList({ alerts }: AlertListProps) {
+export function AlertList({ alerts, unavailable }: AlertListProps) {
+  if (unavailable) {
+    return (
+      <div
+        role="alert"
+        className="rounded-xl border border-dashed border-amber-800/60 bg-amber-950/20 px-6 py-8 text-center"
+      >
+        <p className="text-sm font-semibold text-amber-300">{unavailable}</p>
+        <p className="mt-1 text-xs text-zinc-500">
+          Alert history is unknown while the indexer database is unreachable — this is not the
+          same as no alerts having been raised.
+        </p>
+      </div>
+    );
+  }
+
   if (alerts.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-900/30 px-6 py-12 text-center">

@@ -153,6 +153,41 @@ describe("account detail (/accounts/[id])", () => {
     );
   });
 
+  it("keeps an unreachable feed apart from a treasury that has no history", async () => {
+    const { container } = await renderDetail("Owner", [
+      {
+        match: /\/api\/accounts\?address=.*&alerts=true/,
+        status: 503,
+        body: { error: "Alert feed unavailable", detail: "The indexer database could not be queried." },
+      },
+      {
+        match: /\/api\/accounts\?address=.*&events=true/,
+        status: 503,
+        body: { error: "Settlement events unavailable", detail: "The indexer database could not be queried." },
+      },
+    ]);
+
+    expect(await screen.findByText("Spend history unavailable")).toBeInTheDocument();
+    expect(screen.queryByText(/No spend events recorded yet/)).toBeNull();
+    expect(screen.queryByText("No alerts have been raised for this account.")).toBeNull();
+
+    await waitFor(() => expect(kpiValue("Total Alerts", container)).toBe("—"));
+    expect(kpiValue("Breaches", container)).toBe("—");
+    expect(kpiValue("Near Misses", container)).toBe("—");
+    // The context rule comes from the account record, so it keeps its value.
+    expect(kpiValue("Context Rule", container)).toBe("#1");
+
+    // The counts are explained even while the overview tab is off-screen.
+    expect(
+      screen.getByText(/Alert counts are unknown because the indexer database could not be queried/)
+    ).toBeInTheDocument();
+
+    // The transactions tab reads the same feeds and degrades the same way.
+    fireEvent.click(screen.getByRole("button", { name: "Transactions" }));
+    expect(await screen.findByText(/are unknown while the indexer database is unreachable/)).toBeInTheDocument();
+    expect(screen.queryByText("No transactions recorded")).toBeNull();
+  });
+
   it("loads the multi-sig queue only when its tab is opened", async () => {
     const { harness } = await renderDetail();
 

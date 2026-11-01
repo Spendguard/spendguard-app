@@ -11,6 +11,7 @@ import { MultiSigTab } from "@/components/MultiSigTab";
 import { AuditLogsTab } from "@/components/AuditLogsTab";
 import { SpendChart } from "@/components/SpendChart";
 import { AlertList } from "@/components/AlertList";
+import { FeedUnavailableError, throwIfFeedUnavailable } from "@/lib/feed";
 import type { TreasuryAccount, SpendAlert } from "@spendguard/sdk";
 
 type TabType = "overview" | "transactions" | "policies" | "budgets" | "multisig" | "audit-logs";
@@ -21,6 +22,7 @@ export default function AccountOverviewPage({ params }: { params: Promise<{ id: 
 
   const [account, setAccount] = useState<TreasuryAccount | null>(null);
   const [alerts, setAlerts] = useState<SpendAlert[]>([]);
+  const [alertsUnavailable, setAlertsUnavailable] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>("overview");
   const [loading, setLoading] = useState(true);
 
@@ -36,14 +38,21 @@ export default function AccountOverviewPage({ params }: { params: Promise<{ id: 
         const data = (await res.json()) as TreasuryAccount;
         setAccount(data);
 
-        // Fetch alerts
+        // Fetch alerts. A 503 here means the feed is unreadable — the count
+        // cards must show "unknown", not a reassuring zero.
         const alertsRes = await fetch(`/api/accounts?address=${data.address}&alerts=true`);
+        await throwIfFeedUnavailable(alertsRes, "Alert feed");
         if (alertsRes.ok) {
           const alertData = (await alertsRes.json()) as SpendAlert[];
           setAlerts(alertData);
+          setAlertsUnavailable(null);
         }
       } catch (err) {
         console.error("Failed to load account data:", err);
+        if (err instanceof FeedUnavailableError) {
+          setAlerts([]);
+          setAlertsUnavailable(err.message);
+        }
       } finally {
         setLoading(false);
       }
@@ -81,6 +90,7 @@ export default function AccountOverviewPage({ params }: { params: Promise<{ id: 
   const isCurrentActive = activeAccount?.id === account.id;
   const breachCount = alerts.filter((a) => a.level === "breach").length;
   const nearMissCount = alerts.filter((a) => a.level === "near_miss").length;
+  const alertsUnknown = alertsUnavailable !== null;
 
   const tabs: { key: TabType; label: string; count?: number }[] = [
     { key: "overview", label: "Overview" },
@@ -153,15 +163,15 @@ export default function AccountOverviewPage({ params }: { params: Promise<{ id: 
       <div className="grid gap-4 sm:grid-cols-4">
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 backdrop-blur-sm shadow-sm">
           <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">Total Alerts</p>
-          <p className="mt-1 text-3xl font-extrabold text-white">{alerts.length}</p>
+          <p className="mt-1 text-3xl font-extrabold text-white">{alertsUnknown ? "—" : alerts.length}</p>
         </div>
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 backdrop-blur-sm shadow-sm">
           <p className="text-[11px] font-bold uppercase tracking-wider text-red-400">Breaches</p>
-          <p className="mt-1 text-3xl font-extrabold text-red-400">{breachCount}</p>
+          <p className="mt-1 text-3xl font-extrabold text-red-400">{alertsUnknown ? "—" : breachCount}</p>
         </div>
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 backdrop-blur-sm shadow-sm">
           <p className="text-[11px] font-bold uppercase tracking-wider text-amber-400">Near Misses</p>
-          <p className="mt-1 text-3xl font-extrabold text-amber-400">{nearMissCount}</p>
+          <p className="mt-1 text-3xl font-extrabold text-amber-400">{alertsUnknown ? "—" : nearMissCount}</p>
         </div>
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 backdrop-blur-sm shadow-sm">
           <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-400">Context Rule</p>
@@ -169,9 +179,15 @@ export default function AccountOverviewPage({ params }: { params: Promise<{ id: 
         </div>
       </div>
 
+      {alertsUnknown && (
+        <p className="text-xs text-amber-300">
+          Alert counts are unknown because the indexer database could not be queried. They are
+          not zero.
+        </p>
+      )}
+
       {/* Tabs Navigation */}
-      <div className="flex border-b border-zinc-800 gap-2 overflow-x-auto">
-        {tabs.map((tab) => {
+      <div className="flex border-b border-zinc-800 gap-2 overflow-x-auto">        {tabs.map((tab) => {
           const isActive = activeTab === tab.key;
           return (
             <button
@@ -201,7 +217,7 @@ export default function AccountOverviewPage({ params }: { params: Promise<{ id: 
 
             <div>
               <h3 className="mb-4 text-sm font-bold text-white">Recent Alert Timeline</h3>
-              <AlertList alerts={alerts} />
+              <AlertList alerts={alerts} unavailable={alertsUnavailable} />
             </div>
           </div>
         )}
