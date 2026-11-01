@@ -277,8 +277,8 @@ The read has four outcomes, and the response names each one so the card cannot c
 | Command | Description |
 |---|---|
 | `npm run build` | Builds `@spendguard/sdk`, `@spendguard/indexer`, `@spendguard/web` in order |
-| `npm run typecheck` | Runs `tsc --noEmit` across all workspace projects |
-| `npm run lint` | Runs ESLint across TypeScript and React codebases |
+| `npm run typecheck` | `tsc --noEmit` across all workspace projects, **plus the SDK's test sources** (`packages/sdk/tsconfig.test.json`) |
+| `npm run lint` | ESLint over `src` **and** `test` in every workspace |
 | `npm test` | Runs Vitest suites across SDK, Indexer, and Web app workspaces |
 | `npm -w @spendguard/web run dev` | Launches the Next.js dev server on port 3000 |
 | `npm -w @spendguard/indexer run dev` | Runs the indexer continuous polling loop with tsx |
@@ -287,6 +287,8 @@ The read has four outcomes, and the response names each one so the card cannot c
 | `npm -w @spendguard/indexer run send:transfer` | Sends a real testnet transfer (`-- <amount_USDC> [destination]`; default 5 USDC, funds a fresh Friendbot destination) to generate live on-chain activity |
 
 CI (GitHub Actions) runs **install, typecheck, lint, tests and build** on every push and pull request to `main`, and branch protection requires that job to pass.
+
+The test sources are gated like the shipped ones — linted everywhere, typechecked for the SDK and the web app — because a test that does not typecheck is a test that may be asserting something other than what it looks like it asserts. Vitest transpiles without checking, so a suite can be green while its own file is ill-typed. One gap is left open deliberately: `indexer/test` is linted but not typechecked, because its 39 cases carry 15 pre-existing `noUncheckedIndexedAccess` errors that are their own cleanup rather than part of a gate switch — tracked, not hidden.
 
 ### What the web suite covers
 
